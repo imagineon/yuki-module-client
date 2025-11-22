@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python LUMI Client – Debug/Tooling
+Python YUKI_MODULE Client – Debug/Tooling
 ----------------------------------
-- UART (pyserial) basierter Client für das LUMI TLV-Protokoll
+- UART (pyserial) basierter Client für das YUKI_MODULE TLV-Protokoll
 - Verpflichtender CRC-16/CCITT-FALSE über Header+Payload (Big-Endian)
 - Synchrone Requests/Responses und asynchrone Geolocation-Reports
 - Integrierte CLI für schnelle Debug-Abfragen
@@ -12,14 +12,14 @@ Installation:
   pip install pyserial
 
 Beispiele:
-  python lumi_client.py --port /dev/ttyUSB0 status
-  python lumi_client.py -p /dev/ttyUSB0 version
-  python lumi_client.py -p /dev/ttyUSB0 imei
-  python lumi_client.py -p /dev/ttyUSB0 iccid
-  python lumi_client.py -p /dev/ttyUSB0 pubkey
-  python lumi_client.py -p /dev/ttyUSB0 set 0x1234 uint8 42
-  python lumi_client.py -p /dev/ttyUSB0 geo-request
-  python lumi_client.py -p /dev/ttyUSB0 poll   # wartet auf eingehende Frames (inkl. GEO_RPT)
+  python yuki_module_client.py --port /dev/ttyUSB0 status
+  python yuki_module_client.py -p /dev/ttyUSB0 version
+  python yuki_module_client.py -p /dev/ttyUSB0 imei
+  python yuki_module_client.py -p /dev/ttyUSB0 iccid
+  python yuki_module_client.py -p /dev/ttyUSB0 pubkey
+  python yuki_module_client.py -p /dev/ttyUSB0 set 0x1234 uint8 42
+  python yuki_module_client.py -p /dev/ttyUSB0 geo-request
+  python yuki_module_client.py -p /dev/ttyUSB0 poll   # wartet auf eingehende Frames (inkl. GEO_RPT)
 
 Hinweis:
   Für Windows: Port z. B. "COM5"
@@ -45,7 +45,7 @@ except ImportError as e:
 # Protokoll-Konstanten
 # ---------------------------------------------------------------------
 
-LUMI_MAX_TLV_LENGTH = 511
+YUKI_MODULE_MAX_TLV_LENGTH = 511
 
 # Commands (Type)
 CMD_GET_PUBKEY = 0x00
@@ -95,7 +95,7 @@ ERR_STR = {
 # ---------------------------------------------------------------------
 
 @dataclass
-class LumiGeo:
+class YukiModuleGeo:
     fix_type: int      # 0=none, 1=2D, 2=3D
     sats: int
     ts_utc: int        # UNIX time
@@ -133,7 +133,7 @@ def pack_header(t: int, l: int) -> bytes:
       - t (7 Bit) linksbündig in Byte 0 (wir speichern t << 1)
       - l (9 Bit): Bit8 -> Bit0 von Byte0, Bit7..0 -> Byte1
     """
-    if t > 0x7F or l > LUMI_MAX_TLV_LENGTH:
+    if t > 0x7F or l > YUKI_MODULE_MAX_TLV_LENGTH:
         raise ValueError("ungültiger Header: t oder l außerhalb des Bereichs")
     b0 = ((t & 0x7F) << 1) | ((l >> 8) & 0x01)
     b1 = l & 0xFF
@@ -150,13 +150,13 @@ def unpack_header(h: bytes) -> Tuple[int, int]:
 # UART Client
 # ---------------------------------------------------------------------
 
-GeoCallback = Callable[[LumiGeo], None]
+GeoCallback = Callable[[YukiModuleGeo], None]
 
-class LumiClient:
+class YukiModuleClient:
     def __init__(self, port: str, baud: int = 115200, timeout: float = 1.0,
                  geo_callback: Optional[GeoCallback] = None,
                  logger: Optional[logging.Logger] = None) -> None:
-        self.log = logger or logging.getLogger("lumi")
+        self.log = logger or logging.getLogger("yuki_module")
         self.ser = serial.Serial(
             port=port,
             baudrate=baud,
@@ -191,7 +191,7 @@ class LumiClient:
     # ------------- Framing -------------
 
     def send_frame(self, t: int, payload: bytes) -> None:
-        if len(payload) > LUMI_MAX_TLV_LENGTH:
+        if len(payload) > YUKI_MODULE_MAX_TLV_LENGTH:
             raise ValueError("Payload zu lang")
         header = pack_header(t, len(payload))
         crc = crc16_ccitt_false(header + payload)
@@ -203,7 +203,7 @@ class LumiClient:
     def recv_frame(self) -> Tuple[int, bytes]:
         header = self._read_exact(2)
         t, l = unpack_header(header)
-        if l > LUMI_MAX_TLV_LENGTH:
+        if l > YUKI_MODULE_MAX_TLV_LENGTH:
             raise IOError("Protokollfehler: Länge > Limit")
         payload = self._read_exact(l) if l else b""
         crc_rx = self._read_exact(2)
@@ -258,7 +258,7 @@ class LumiClient:
         # Payload gemäß CMD_SET
         flags = 0x10 if read_only else 0x00
         if vtype in (TYPE_STRING, TYPE_BIN):
-            if len(data) > (LUMI_MAX_TLV_LENGTH - 6):
+            if len(data) > (YUKI_MODULE_MAX_TLV_LENGTH - 6):
                 raise ValueError("Daten zu lang")
             payload = struct.pack(">HBBBH", param_id, flags, vtype, 0, 0)  # Platzhalter für Länge?
             # Korrigiert: ID (2), Flags (1), Type (1), Len (2), Data
@@ -266,7 +266,7 @@ class LumiClient:
             err, _ = self.request(CMD_SET, payload)
             return err
         else:
-            if len(data) > (LUMI_MAX_TLV_LENGTH - 4):
+            if len(data) > (YUKI_MODULE_MAX_TLV_LENGTH - 4):
                 raise ValueError("Daten zu lang")
             payload = struct.pack(">HBB", param_id, flags, vtype) + data
             err, _ = self.request(CMD_SET, payload)
@@ -278,7 +278,7 @@ class LumiClient:
         """Sendet Geolocation-Anfrage. Es folgt KEINE Sofortantwort."""
         self.send_frame(CMD_GEO_REQ, b"")
 
-    def _decode_geo(self, p: bytes) -> Optional[LumiGeo]:
+    def _decode_geo(self, p: bytes) -> Optional[YukiModuleGeo]:
         if len(p) != 22:
             return None
         # Offsets: 0:fix,1:sats,2:ts(4),6:lat(4),10:lon(4),14:alt(4),18:hdop(4)
@@ -289,7 +289,7 @@ class LumiClient:
         lon = struct.unpack(">i", p[10:14])[0]
         alt = struct.unpack(">i", p[14:18])[0]
         hdop = struct.unpack(">I", p[18:22])[0]
-        return LumiGeo(fix, sats, ts, lat, lon, alt, hdop)
+        return YukiModuleGeo(fix, sats, ts, lat, lon, alt, hdop)
 
     # ------------- Polling -------------
 
@@ -389,7 +389,7 @@ def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
 # ---------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="LUMI Python Client (Debug)")
+    ap = argparse.ArgumentParser(description="YUKI_MODULE Python Client (Debug)")
     ap.add_argument("-p", "--port", required=True, help="serielle Schnittstelle (z. B. /dev/ttyUSB0 oder COM5)")
     ap.add_argument("-b", "--baud", type=int, default=115200, help="Baudrate (Default: 115200)")
     ap.add_argument("--timeout", type=float, default=1.0, help="Read/Write Timeout in Sekunden (Default: 1.0)")
@@ -422,17 +422,17 @@ def main(argv=None) -> int:
     elif args.verbose >= 2:
         lvl = logging.DEBUG
     logging.basicConfig(level=lvl, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    log = logging.getLogger("lumi")
+    log = logging.getLogger("yuki_module")
 
     # Callback für Geolocation
-    def on_geo(g: LumiGeo) -> None:
+    def on_geo(g: YukiModuleGeo) -> None:
         lat = g.lat_e7 / 1e7
         lon = g.lon_e7 / 1e7
         alt = g.alt_cm / 100.0
         print(f"GEO: fix={g.fix_type} sats={g.sats} t={g.ts_utc} lat={lat:.7f} lon={lon:.7f} alt={alt:.2f}m hdop={g.hdop_centi/100.0:.2f}")
 
     try:
-        cli = LumiClient(args.port, baud=args.baud, timeout=args.timeout, geo_callback=on_geo, logger=log)
+        cli = YukiModuleClient(args.port, baud=args.baud, timeout=args.timeout, geo_callback=on_geo, logger=log)
     except Exception as e:
         log.error("Konnte Port nicht öffnen: %s", e)
         return 2

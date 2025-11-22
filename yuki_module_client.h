@@ -1,8 +1,8 @@
-#ifndef LUMI_CLIENT_H
-#define LUMI_CLIENT_H
+#ifndef YUKI_MODULE_CLIENT_H
+#define YUKI_MODULE_CLIENT_H
 
 /*
- * LUMI UART Client – Benutzer-API
+ * YUKI-Module UART Client – Benutzer-API
  *
  * Telegrammformat (UART):
  *   Byte 0..1: Header
@@ -23,13 +23,13 @@
  *   ssize_t my_write(void* c, const uint8_t* b, size_t l);
  *
  *   void on_set(uint16_t id, uint8_t type, bool ro, const void* data, size_t len);
- *   void on_geo(const struct LumiGeo* g);
+ *   void on_geo(const struct YukiModuleGeo* g);
  *
- *   LumiInterface ifc = { .ctx = ctx, .read = my_read, .write = my_write,
+ *   YukiModuleInterface ifc = { .ctx = ctx, .read = my_read, .write = my_write,
  *                         .handler = on_set, .geo_cb = on_geo };
- *   lumi_init(&ifc, NULL);
- *   lumi_geo_request();       // Geofix anfordern; Report kommt später via Callback
- *   while (run) { lumi_poll_once(); }
+ *   yuki_module_init(&ifc, NULL);
+ *   yuki_module_geo_request();       // Geofix anfordern; Report kommt später via Callback
+ *   while (run) { yuki_module_poll_once(); }
  */
 
 #include <stdint.h>
@@ -40,7 +40,7 @@
 extern "C" {
 #endif
 
-#define LUMI_MAX_TLV_LENGTH 511
+#define YUKI_MODULE_MAX_TLV_LENGTH 511
 
 /* Kommandos (Type) */
 typedef enum {
@@ -53,7 +53,7 @@ typedef enum {
     CMD_STATUS     = 0x07,
     CMD_GEO_REQ    = 0x08,
     CMD_GEO_RPT    = 0x09
-} LumiCmd;
+} YukiModuleCmd;
 
 /* Datentypen im Payload (TYPE_*) */
 typedef enum {
@@ -72,7 +72,7 @@ typedef enum {
     TYPE_UINT64  = 0x0D,
     TYPE_STRING  = 0x0E,
     TYPE_IINT64  = 0x0F
-} LumiType;
+} YukiModuleType;
 
 /* Fehlercodes im Antwort-Payload[0] bei synchronen Antworten */
 typedef enum {
@@ -81,7 +81,7 @@ typedef enum {
     ERR_ARG       = 0x02,
     ERR_BUSY      = 0x03,
     ERR_INTERNAL  = 0xFF
-} LumiErr;
+} YukiModuleErr;
 
 /* Geolocation-Daten (Report-Payload dekodiert) */
 typedef struct {
@@ -98,14 +98,14 @@ typedef struct {
     int32_t  alt_cm;
     /* HDOP * 100 (z. B. 95 => 0.95) */
     uint32_t hdop_centi;
-} LumiGeo;
+} YukiModuleGeo;
 
 /* UART-IO Callback-Signaturen */
-typedef ssize_t (*lumi_read_fn)(void* ctx, uint8_t* buf, size_t len);
-typedef ssize_t (*lumi_write_fn)(void* ctx, const uint8_t* buf, size_t len);
+typedef ssize_t (*yuki_module_read_fn)(void* ctx, uint8_t* buf, size_t len);
+typedef ssize_t (*yuki_module_write_fn)(void* ctx, const uint8_t* buf, size_t len);
 
 /* SET-Callback bei eingehenden CMD_SET */
-typedef void (*lumi_on_set_fn)(
+typedef void (*yuki_module_on_set_fn)(
     uint16_t id,
     uint8_t  type,
     bool     read_only,
@@ -114,49 +114,49 @@ typedef void (*lumi_on_set_fn)(
 );
 
 /* Geolocation-Callback bei CMD_GEO_RPT */
-typedef void (*lumi_on_geo_fn)(const LumiGeo* geo);
+typedef void (*yuki_module_on_geo_fn)(const YukiModuleGeo* geo);
 
 /* UART-Schnittstelle + Callbacks */
 typedef struct {
     void*          ctx;
-    lumi_read_fn   read;
-    lumi_write_fn  write;
-    lumi_on_set_fn handler;   /* optional */
-    lumi_on_geo_fn geo_cb;    /* optional; wird bei CMD_GEO_RPT aufgerufen */
-} LumiInterface;
+    yuki_module_read_fn   read;
+    yuki_module_write_fn  write;
+    yuki_module_on_set_fn handler;   /* optional */
+    yuki_module_on_geo_fn geo_cb;    /* optional; wird bei CMD_GEO_RPT aufgerufen */
+} YukiModuleInterface;
 
 /* TLV-Container (kann für eigene Helfer benutzt werden) */
 typedef struct {
     uint8_t  t;
     uint16_t l;
-    uint8_t  v[LUMI_MAX_TLV_LENGTH];
-} LumiMsg;
+    uint8_t  v[YUKI_MODULE_MAX_TLV_LENGTH];
+} YukiModuleMsg;
 
 /* Initialisierung – vor allen anderen Aufrufen */
-bool lumi_init(const LumiInterface* iface, void* reserved);
+bool yuki_module_init(const YukiModuleInterface* iface, void* reserved);
 
 /* Einen Eingangsframe verarbeiten (ruft Callbacks bei Bedarf) */
-bool lumi_poll_once(void);
+bool yuki_module_poll_once(void);
 
 /* Generisches Senden/Anfragen */
-bool lumi_send(const LumiMsg* out);
-bool lumi_request(const LumiMsg* out, LumiMsg* in_msg, LumiErr* err);
+bool yuki_module_send(const YukiModuleMsg* out);
+bool yuki_module_request(const YukiModuleMsg* out, YukiModuleMsg* in_msg, YukiModuleErr* err);
 
 /* High-Level API */
-bool lumi_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only);
-bool lumi_sync(void);
-bool lumi_version(char* out, size_t out_len);
-bool lumi_status(LumiErr* out_status);
-bool lumi_get_pubkey(uint8_t out64[64]);
-bool lumi_get_imei(char* out, size_t out_len);
-bool lumi_get_iccid(char* out, size_t out_len);
+bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only);
+bool yuki_module_sync(void);
+bool yuki_module_version(char* out, size_t out_len);
+bool yuki_module_status(YukiModuleErr* out_status);
+bool yuki_module_get_pubkey(uint8_t out64[64]);
+bool yuki_module_get_imei(char* out, size_t out_len);
+bool yuki_module_get_iccid(char* out, size_t out_len);
 
 /* Geolocation-API */
-bool lumi_geo_request(void);                 /* CMD_GEO_REQ senden; Report kommt asynchron */
-bool lumi_set_geo_callback(lumi_on_geo_fn);  /* Callback nachträglich setzen/ändern */
+bool yuki_module_geo_request(void);                 /* CMD_GEO_REQ senden; Report kommt asynchron */
+bool yuki_module_set_geo_callback(yuki_module_on_geo_fn);  /* Callback nachträglich setzen/ändern */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* LUMI_CLIENT_H */
+#endif /* YUKI_MODULE_CLIENT_H */

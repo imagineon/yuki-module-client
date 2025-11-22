@@ -1,14 +1,14 @@
-#include "lumi_client.h"
+#include "yuki_module_client.h"
 #include <string.h>
 #include <errno.h>
 
 /* Zustandsverwaltung */
 static struct {
     void*          ctx;
-    lumi_read_fn   read;
-    lumi_write_fn  write;
-    lumi_on_set_fn handler;
-    lumi_on_geo_fn geo_cb;
+    yuki_module_read_fn   read;
+    yuki_module_write_fn  write;
+    yuki_module_on_set_fn handler;
+    yuki_module_on_geo_fn geo_cb;
     bool           ready;
 } g;
 
@@ -38,7 +38,7 @@ static void unpack_header(const uint8_t* h, uint8_t* t, uint16_t* l)
 }
 
 /* IO-Helfer */
-static bool io_read_all(void* ctx, lumi_read_fn rf, uint8_t* buf, size_t len)
+static bool io_read_all(void* ctx, yuki_module_read_fn rf, uint8_t* buf, size_t len)
 {
     size_t off = 0;
     while (off < len) {
@@ -48,7 +48,7 @@ static bool io_read_all(void* ctx, lumi_read_fn rf, uint8_t* buf, size_t len)
     }
     return true;
 }
-static bool io_write_all(void* ctx, lumi_write_fn wf, const uint8_t* buf, size_t len)
+static bool io_write_all(void* ctx, yuki_module_write_fn wf, const uint8_t* buf, size_t len)
 {
     size_t off = 0;
     while (off < len) {
@@ -60,14 +60,14 @@ static bool io_write_all(void* ctx, lumi_write_fn wf, const uint8_t* buf, size_t
 }
 
 /* Frame Senden/Empfangen (mit CRC-Pflicht) */
-static bool send_frame(const LumiMsg* m)
+static bool send_frame(const YukiModuleMsg* m)
 {
-    if (m->t > 0x7F || m->l > LUMI_MAX_TLV_LENGTH) { errno = EINVAL; return false; }
+    if (m->t > 0x7F || m->l > YUKI_MODULE_MAX_TLV_LENGTH) { errno = EINVAL; return false; }
 
     uint8_t header[2];
     pack_header(header, m->t, m->l);
 
-    uint8_t tmp[2 + LUMI_MAX_TLV_LENGTH];
+    uint8_t tmp[2 + YUKI_MODULE_MAX_TLV_LENGTH];
     memcpy(tmp, header, 2);
     if (m->l) memcpy(tmp + 2, m->v, m->l);
     uint16_t crc = crc16_ccitt_false(tmp, (size_t)(2 + m->l));
@@ -78,13 +78,13 @@ static bool send_frame(const LumiMsg* m)
     if (!io_write_all(g.ctx, g.write, crcbe, 2)) return false;
     return true;
 }
-static bool recv_frame(LumiMsg* m)
+static bool recv_frame(YukiModuleMsg* m)
 {
     uint8_t header[2];
     if (!io_read_all(g.ctx, g.read, header, 2)) return false;
 
     unpack_header(header, &m->t, &m->l);
-    if (m->l > LUMI_MAX_TLV_LENGTH) { errno = EPROTO; return false; }
+    if (m->l > YUKI_MODULE_MAX_TLV_LENGTH) { errno = EPROTO; return false; }
 
     if (m->l && !io_read_all(g.ctx, g.read, m->v, m->l)) return false;
 
@@ -92,7 +92,7 @@ static bool recv_frame(LumiMsg* m)
     if (!io_read_all(g.ctx, g.read, crcbe, 2)) return false;
     uint16_t crc_rx = (uint16_t)crcbe[0] << 8 | crcbe[1];
 
-    uint8_t tmp[2 + LUMI_MAX_TLV_LENGTH];
+    uint8_t tmp[2 + YUKI_MODULE_MAX_TLV_LENGTH];
     memcpy(tmp, header, 2);
     if (m->l) memcpy(tmp + 2, m->v, m->l);
     uint16_t crc_calc = crc16_ccitt_false(tmp, (size_t)(2 + m->l));
@@ -112,7 +112,7 @@ static int32_t be32s(const uint8_t* p)
 }
 
 /* Öffentliche API */
-bool lumi_init(const LumiInterface* iface, void* reserved)
+bool yuki_module_init(const YukiModuleInterface* iface, void* reserved)
 {
     (void)reserved;
     if (!iface || !iface->read || !iface->write) { errno = EINVAL; return false; }
@@ -125,13 +125,13 @@ bool lumi_init(const LumiInterface* iface, void* reserved)
     return true;
 }
 
-bool lumi_send(const LumiMsg* out)
+bool yuki_module_send(const YukiModuleMsg* out)
 {
     if (!g.ready || !out) { errno = g.ready ? EINVAL : EBUSY; return false; }
     return send_frame(out);
 }
 
-bool lumi_request(const LumiMsg* out, LumiMsg* in_msg, LumiErr* err)
+bool yuki_module_request(const YukiModuleMsg* out, YukiModuleMsg* in_msg, YukiModuleErr* err)
 {
     if (!g.ready || !out) { errno = g.ready ? EINVAL : EBUSY; return false; }
 
@@ -139,12 +139,12 @@ bool lumi_request(const LumiMsg* out, LumiMsg* in_msg, LumiErr* err)
 
     if (!send_frame(out)) { g.ready = true; return false; }
 
-    LumiMsg resp;
+    YukiModuleMsg resp;
     if (!recv_frame(&resp)) { g.ready = true; return false; }
 
     if (resp.l == 0) { g.ready = true; errno = EPROTO; return false; }
 
-    if (err) *err = (LumiErr)resp.v[0];
+    if (err) *err = (YukiModuleErr)resp.v[0];
     if (in_msg) *in_msg = resp;
 
     g.ready = true;
@@ -152,9 +152,9 @@ bool lumi_request(const LumiMsg* out, LumiMsg* in_msg, LumiErr* err)
 }
 
 /* Eingangsframe verarbeiten: SET und GEO_RPT werden an Callbacks gegeben. */
-bool lumi_poll_once(void)
+bool yuki_module_poll_once(void)
 {
-    LumiMsg m;
+    YukiModuleMsg m;
     if (!recv_frame(&m)) return false;
 
     if (m.t == CMD_SET && g.handler) {
@@ -178,7 +178,7 @@ bool lumi_poll_once(void)
 
         g.handler(id, type, ro, data_ptr, len);
 
-        LumiMsg r = { .t = m.t, .l = 1, .v = { (uint8_t)ERR_OK } };
+        YukiModuleMsg r = { .t = m.t, .l = 1, .v = { (uint8_t)ERR_OK } };
         (void)send_frame(&r);
         return true;
     }
@@ -196,7 +196,7 @@ bool lumi_poll_once(void)
            Gesamt: 22 Byte
         */
         if (m.l == 22) {
-            LumiGeo gfix;
+            YukiModuleGeo gfix;
             gfix.fix_type   = m.v[0];
             gfix.sats       = m.v[1];
             gfix.ts_utc     = be32u(&m.v[2]);
@@ -213,9 +213,9 @@ bool lumi_poll_once(void)
 }
 
 /* High-Level Helfer */
-bool lumi_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only)
+bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only)
 {
-    LumiMsg m; memset(&m, 0, sizeof m);
+    YukiModuleMsg m; memset(&m, 0, sizeof m);
     m.t = CMD_SET;
 
     m.v[0] = (uint8_t)((id >> 8) & 0xFF);
@@ -224,36 +224,36 @@ bool lumi_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read
     m.v[3] = type;
 
     if (type == TYPE_STRING || type == TYPE_BIN) {
-        if (len > (LUMI_MAX_TLV_LENGTH - 6)) { errno = EMSGSIZE; return false; }
+        if (len > (YUKI_MODULE_MAX_TLV_LENGTH - 6)) { errno = EMSGSIZE; return false; }
         m.v[4] = (uint8_t)((len >> 8) & 0xFF);
         m.v[5] = (uint8_t)(len & 0xFF);
         if (len && data) memcpy(&m.v[6], data, len);
         m.l = (uint16_t)(len + 6);
     } else {
-        if (len > (LUMI_MAX_TLV_LENGTH - 4)) { errno = EMSGSIZE; return false; }
+        if (len > (YUKI_MODULE_MAX_TLV_LENGTH - 4)) { errno = EMSGSIZE; return false; }
         if (len && data) memcpy(&m.v[4], data, len);
         m.l = (uint16_t)(len + 4);
     }
 
-    LumiMsg r; LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, &r, &e)) return false;
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
     return (e == ERR_OK);
 }
 
-bool lumi_sync(void)
+bool yuki_module_sync(void)
 {
-    LumiMsg m = { .t = CMD_SYNC, .l = 0 };
-    LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, NULL, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_SYNC, .l = 0 };
+    YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, NULL, &e)) return false;
     return (e == ERR_OK);
 }
 
-bool lumi_version(char* out, size_t out_len)
+bool yuki_module_version(char* out, size_t out_len)
 {
     if (!out || out_len == 0) { errno = EINVAL; return false; }
-    LumiMsg m = { .t = CMD_VERSION, .l = 0 };
-    LumiMsg r; LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, &r, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_VERSION, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
     if (e != ERR_OK) { errno = EPROTO; return false; }
 
     if (r.l <= 1) { out[0] = '\0'; return true; }
@@ -264,32 +264,32 @@ bool lumi_version(char* out, size_t out_len)
     return true;
 }
 
-bool lumi_status(LumiErr* out_status)
+bool yuki_module_status(YukiModuleErr* out_status)
 {
-    LumiMsg m = { .t = CMD_STATUS, .l = 0 };
-    LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, NULL, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_STATUS, .l = 0 };
+    YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, NULL, &e)) return false;
     if (out_status) *out_status = e;
     return true;
 }
 
-bool lumi_get_pubkey(uint8_t out64[64])
+bool yuki_module_get_pubkey(uint8_t out64[64])
 {
     if (!out64) { errno = EINVAL; return false; }
-    LumiMsg m = { .t = CMD_GET_PUBKEY, .l = 0 };
-    LumiMsg r; LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, &r, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_GET_PUBKEY, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
     if (e != ERR_OK || r.l < (1 + 64)) { errno = EPROTO; return false; }
     memcpy(out64, &r.v[1], 64);
     return true;
 }
 
-bool lumi_get_imei(char* out, size_t out_len)
+bool yuki_module_get_imei(char* out, size_t out_len)
 {
     if (!out || out_len == 0) { errno = EINVAL; return false; }
-    LumiMsg m = { .t = CMD_GET_IMEI, .l = 0 };
-    LumiMsg r; LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, &r, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_GET_IMEI, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
     if (e != ERR_OK) { errno = EPROTO; return false; }
     if (r.l <= 1) { out[0] = '\0'; return true; }
     size_t n = (size_t)(r.l - 1);
@@ -299,12 +299,12 @@ bool lumi_get_imei(char* out, size_t out_len)
     return true;
 }
 
-bool lumi_get_iccid(char* out, size_t out_len)
+bool yuki_module_get_iccid(char* out, size_t out_len)
 {
     if (!out || out_len == 0) { errno = EINVAL; return false; }
-    LumiMsg m = { .t = CMD_GET_ICCID, .l = 0 };
-    LumiMsg r; LumiErr e = ERR_INTERNAL;
-    if (!lumi_request(&m, &r, &e)) return false;
+    YukiModuleMsg m = { .t = CMD_GET_ICCID, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
     if (e != ERR_OK) { errno = EPROTO; return false; }
     if (r.l <= 1) { out[0] = '\0'; return true; }
     size_t n = (size_t)(r.l - 1);
@@ -315,14 +315,14 @@ bool lumi_get_iccid(char* out, size_t out_len)
 }
 
 /* Geolocation-API */
-bool lumi_geo_request(void)
+bool yuki_module_geo_request(void)
 {
-    LumiMsg m = { .t = CMD_GEO_REQ, .l = 0 };
+    YukiModuleMsg m = { .t = CMD_GEO_REQ, .l = 0 };
     /* Keine synchrone Antwort erwartet; nur senden. */
-    return lumi_send(&m);
+    return yuki_module_send(&m);
 }
 
-bool lumi_set_geo_callback(lumi_on_geo_fn cb)
+bool yuki_module_set_geo_callback(yuki_module_on_geo_fn cb)
 {
     g.geo_cb = cb;
     return true;
