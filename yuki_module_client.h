@@ -2,23 +2,23 @@
 #define YUKI_MODULE_CLIENT_H
 
 /*
- * YUKI-Module UART Client – Benutzer-API
+ * YUKI-Module UART Client – User API
  *
- * Telegrammformat (UART):
+ * Telegram frame format (UART):
  *   Byte 0..1: Header
- *      - Type (7 Bit) linksbündig in Byte 0
- *      - Länge L (9 Bit) = Nutzdatenbytes (ohne CRC)
- *         L[8]  -> Bit0 von Byte 0
- *         L[7:0]-> Byte 1
+ *      - Type (7 bits), left-aligned in byte 0
+ *      - Length L (9 bits) = payload bytes (without CRC)
+ *         L[8]   -> bit 0 of byte 0
+ *         L[7:0] -> byte 1
  *   Byte 2..(2+L-1): Payload (V)
- *   Byte (2+L)..(3+L): CRC-16 (CCITT-FALSE), Big-Endian, berechnet über Header+Payload
+ *   Byte (2+L)..(3+L): CRC-16 (CCITT-FALSE), big-endian, calculated over header+payload
  *
- * Hinweise:
- *   - L enthält nur die Länge der Nutzdaten; der CRC gehört nicht zu L.
- *   - Bei CRC-Fehlern wird das Telegramm verworfen; die Funktion liefert false/Fehlercode.
- *   - Asynchrone Ereignisse (z. B. Geolocation-Report) werden über Callbacks signalisiert.
+ * Notes:
+ *   - L contains only the length of the payload; the CRC is not part of L.
+ *   - On CRC errors, the frame is discarded; the function returns false/an error code.
+ *   - Asynchronous events (e.g. geolocation reports) are signalled via callbacks.
  *
- * Minimalbeispiel:
+ * Minimal example:
  *   ssize_t my_read(void* c, uint8_t* b, size_t l);
  *   ssize_t my_write(void* c, const uint8_t* b, size_t l);
  *
@@ -28,7 +28,7 @@
  *   YukiModuleInterface ifc = { .ctx = ctx, .read = my_read, .write = my_write,
  *                         .handler = on_set, .geo_cb = on_geo };
  *   yuki_module_init(&ifc, NULL);
- *   yuki_module_geo_request();       // Geofix anfordern; Report kommt später via Callback
+ *   yuki_module_geo_request();       // Request geo fix; report arrives later via callback
  *   while (run) { yuki_module_poll_once(); }
  */
 
@@ -40,9 +40,9 @@
 extern "C" {
 #endif
 
-#define YUKI_MODULE_MAX_TLV_LENGTH 511
+#define LUMI_MAX_TLV_LENGTH 511
 
-/* Kommandos (Type) */
+/* Commands (Type) */
 typedef enum {
     CMD_GET_PUBKEY = 0x00,
     CMD_GET_IMEI   = 0x01,
@@ -55,7 +55,7 @@ typedef enum {
     CMD_GEO_RPT    = 0x09
 } YukiModuleCmd;
 
-/* Datentypen im Payload (TYPE_*) */
+/* Data types in payload (TYPE_*) */
 typedef enum {
     TYPE_INT32   = 0x01,
     TYPE_INT16   = 0x02,
@@ -74,7 +74,7 @@ typedef enum {
     TYPE_IINT64  = 0x0F
 } YukiModuleType;
 
-/* Fehlercodes im Antwort-Payload[0] bei synchronen Antworten */
+/* Error codes in response payload[0] for synchronous replies */
 typedef enum {
     ERR_OK        = 0x00,
     ERR_CMD       = 0x01,
@@ -83,28 +83,28 @@ typedef enum {
     ERR_INTERNAL  = 0xFF
 } YukiModuleErr;
 
-/* Geolocation-Daten (Report-Payload dekodiert) */
+/* Geolocation data (decoded report payload) */
 typedef struct {
-    /* Fix-Typ: 0 = kein Fix, 1 = 2D, 2 = 3D */
+    /* Fix type: 0 = no fix, 1 = 2D, 2 = 3D */
     uint8_t  fix_type;
-    /* Anzahl sichtbarer/benutzter Satelliten (je nach Moduldefinition) */
+    /* Number of visible/used satellites (depending on module definition) */
     uint8_t  sats;
-    /* UNIX-Zeit in Sekunden (UTC) */
+    /* UNIX time in seconds (UTC) */
     uint32_t ts_utc;
-    /* Breitengrad und Längengrad in 1e-7 Grad (WGS84) */
+    /* Latitude and longitude in 1e-7 degrees (WGS84) */
     int32_t  lat_e7;
     int32_t  lon_e7;
-    /* Höhe in Zentimetern (MSL) – kann negativ sein */
+    /* Altitude in centimetres (MSL) – can be negative */
     int32_t  alt_cm;
-    /* HDOP * 100 (z. B. 95 => 0.95) */
+    /* HDOP * 100 (e.g. 95 => 0.95) */
     uint32_t hdop_centi;
 } YukiModuleGeo;
 
-/* UART-IO Callback-Signaturen */
+/* UART I/O callback signatures */
 typedef ssize_t (*yuki_module_read_fn)(void* ctx, uint8_t* buf, size_t len);
 typedef ssize_t (*yuki_module_write_fn)(void* ctx, const uint8_t* buf, size_t len);
 
-/* SET-Callback bei eingehenden CMD_SET */
+/* SET callback for incoming CMD_SET */
 typedef void (*yuki_module_on_set_fn)(
     uint16_t id,
     uint8_t  type,
@@ -113,36 +113,36 @@ typedef void (*yuki_module_on_set_fn)(
     size_t   len
 );
 
-/* Geolocation-Callback bei CMD_GEO_RPT */
+/* Geolocation callback for CMD_GEO_RPT */
 typedef void (*yuki_module_on_geo_fn)(const YukiModuleGeo* geo);
 
-/* UART-Schnittstelle + Callbacks */
+/* UART interface + callbacks */
 typedef struct {
     void*          ctx;
     yuki_module_read_fn   read;
     yuki_module_write_fn  write;
     yuki_module_on_set_fn handler;   /* optional */
-    yuki_module_on_geo_fn geo_cb;    /* optional; wird bei CMD_GEO_RPT aufgerufen */
+    yuki_module_on_geo_fn geo_cb;    /* optional; called on CMD_GEO_RPT */
 } YukiModuleInterface;
 
-/* TLV-Container (kann für eigene Helfer benutzt werden) */
+/* TLV container (can be used for custom helpers) */
 typedef struct {
     uint8_t  t;
     uint16_t l;
-    uint8_t  v[YUKI_MODULE_MAX_TLV_LENGTH];
+    uint8_t  v[LUMI_MAX_TLV_LENGTH];
 } YukiModuleMsg;
 
-/* Initialisierung – vor allen anderen Aufrufen */
+/* Initialisation – must be called before all other functions */
 bool yuki_module_init(const YukiModuleInterface* iface, void* reserved);
 
-/* Einen Eingangsframe verarbeiten (ruft Callbacks bei Bedarf) */
+/* Process one incoming frame (invokes callbacks as needed) */
 bool yuki_module_poll_once(void);
 
-/* Generisches Senden/Anfragen */
+/* Generic send/request helpers */
 bool yuki_module_send(const YukiModuleMsg* out);
 bool yuki_module_request(const YukiModuleMsg* out, YukiModuleMsg* in_msg, YukiModuleErr* err);
 
-/* High-Level API */
+/* High-level API */
 bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only);
 bool yuki_module_sync(void);
 bool yuki_module_version(char* out, size_t out_len);
@@ -151,12 +151,12 @@ bool yuki_module_get_pubkey(uint8_t out64[64]);
 bool yuki_module_get_imei(char* out, size_t out_len);
 bool yuki_module_get_iccid(char* out, size_t out_len);
 
-/* Geolocation-API */
-bool yuki_module_geo_request(void);                 /* CMD_GEO_REQ senden; Report kommt asynchron */
-bool yuki_module_set_geo_callback(yuki_module_on_geo_fn);  /* Callback nachträglich setzen/ändern */
+/* Geolocation API */
+bool yuki_module_geo_request(void);                 /* Send CMD_GEO_REQ; report is delivered asynchronously */
+bool yuki_module_set_geo_callback(lumi_on_geo_fn);  /* Set or change callback afterwards */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YUKI_MODULE_CLIENT_H */
+#endif /* LUMI_CLIENT_H */

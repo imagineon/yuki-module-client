@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python YUKI_MODULE Client – Debug/Tooling
+Python YUKI-Module Client – Debug/Tooling
 ----------------------------------
-- UART (pyserial) basierter Client für das YUKI_MODULE TLV-Protokoll
-- Verpflichtender CRC-16/CCITT-FALSE über Header+Payload (Big-Endian)
-- Synchrone Requests/Responses und asynchrone Geolocation-Reports
-- Integrierte CLI für schnelle Debug-Abfragen
+- UART (pyserial) based client for the YUKI-Module TLV protocol
+- Mandatory CRC-16/CCITT-FALSE over header + payload (big-endian)
+- Synchronous requests/responses and asynchronous geolocation reports
+- Integrated CLI for quick debug queries
 
 Installation:
   pip install pyserial
 
-Beispiele:
+Examples:
   python yuki_module_client.py --port /dev/ttyUSB0 status
   python yuki_module_client.py -p /dev/ttyUSB0 version
   python yuki_module_client.py -p /dev/ttyUSB0 imei
@@ -19,10 +19,10 @@ Beispiele:
   python yuki_module_client.py -p /dev/ttyUSB0 pubkey
   python yuki_module_client.py -p /dev/ttyUSB0 set 0x1234 uint8 42
   python yuki_module_client.py -p /dev/ttyUSB0 geo-request
-  python yuki_module_client.py -p /dev/ttyUSB0 poll   # wartet auf eingehende Frames (inkl. GEO_RPT)
+  python yuki_module_client.py -p /dev/ttyUSB0 poll   # waits for incoming frames (incl. GEO_RPT)
 
-Hinweis:
-  Für Windows: Port z. B. "COM5"
+Note:
+  On Windows the port is something like "COM5"
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from typing import Callable, Optional, Tuple
 try:
     import serial  # pyserial
 except ImportError as e:
-    print("pyserial nicht installiert. Bitte mit 'pip install pyserial' nachinstallieren.", file=sys.stderr)
+    print("pyserial not installed. Please install with 'pip install pyserial'.", file=sys.stderr)
     raise
 
 # ---------------------------------------------------------------------
@@ -110,8 +110,8 @@ class YukiModuleGeo:
 
 def crc16_ccitt_false(data: bytes) -> int:
     """
-    CRC-16/CCITT-FALSE (Poly 0x1021, Init 0xFFFF, kein Final-XOR)
-    über alle Bytes in 'data'.
+    CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no final XOR)
+    over all bytes in 'data'.
     """
     crc = 0xFFFF
     for byte in data:
@@ -129,19 +129,19 @@ def crc16_ccitt_false(data: bytes) -> int:
 
 def pack_header(t: int, l: int) -> bytes:
     """
-    Header (2 Bytes):
-      - t (7 Bit) linksbündig in Byte 0 (wir speichern t << 1)
-      - l (9 Bit): Bit8 -> Bit0 von Byte0, Bit7..0 -> Byte1
+    Header (2 bytes):
+      - t (7 bits) left-aligned in byte 0 (we store t << 1)
+      - l (9 bits): bit 8 -> bit 0 of byte 0, bits 7..0 -> byte 1
     """
     if t > 0x7F or l > YUKI_MODULE_MAX_TLV_LENGTH:
-        raise ValueError("ungültiger Header: t oder l außerhalb des Bereichs")
+        raise ValueError("invalid Header: t or l out of range")
     b0 = ((t & 0x7F) << 1) | ((l >> 8) & 0x01)
     b1 = l & 0xFF
     return bytes([b0, b1])
 
 def unpack_header(h: bytes) -> Tuple[int, int]:
     if len(h) != 2:
-        raise ValueError("Header-Länge != 2")
+        raise ValueError("Header-Length != 2")
     t = h[0] >> 1
     l = ((h[0] & 0x01) << 8) | h[1]
     return t, l
@@ -171,7 +171,7 @@ class YukiModuleClient:
     # ------------- Low-level IO -------------
 
     def _read_exact(self, n: int) -> bytes:
-        """Liest genau n Bytes oder wirft Timeout/IOError."""
+        """Reads exactly n bytes or raises Timeout/IOError."""
         data = bytearray()
         while len(data) < n:
             chunk = self.ser.read(n - len(data))
@@ -192,7 +192,7 @@ class YukiModuleClient:
 
     def send_frame(self, t: int, payload: bytes) -> None:
         if len(payload) > YUKI_MODULE_MAX_TLV_LENGTH:
-            raise ValueError("Payload zu lang")
+            raise ValueError("Payload too long")
         header = pack_header(t, len(payload))
         crc = crc16_ccitt_false(header + payload)
         frame = header + payload + struct.pack(">H", crc)
@@ -204,13 +204,13 @@ class YukiModuleClient:
         header = self._read_exact(2)
         t, l = unpack_header(header)
         if l > YUKI_MODULE_MAX_TLV_LENGTH:
-            raise IOError("Protokollfehler: Länge > Limit")
+            raise IOError("Protocol error: Length > Limit")
         payload = self._read_exact(l) if l else b""
         crc_rx = self._read_exact(2)
         (crc_rx_val,) = struct.unpack(">H", crc_rx)
         crc_calc = crc16_ccitt_false(header + payload)
         if crc_calc != crc_rx_val:
-            raise IOError("CRC-Fehler (calc=0x%04X, rx=0x%04X)" % (crc_calc, crc_rx_val))
+            raise IOError("CRC-Error (calc=0x%04X, rx=0x%04X)" % (crc_calc, crc_rx_val))
         if self.log.isEnabledFor(logging.DEBUG):
             self.log.debug("RX: t=0x%02X, l=%d, crc=0x%04X OK", t, l, crc_rx_val)
         return t, payload
@@ -218,11 +218,11 @@ class YukiModuleClient:
     # ------------- Requests -------------
 
     def request(self, t: int, payload: bytes = b"") -> Tuple[int, bytes]:
-        """Sendet einen Request und wartet auf eine Antwort. Liefert (err, data)."""
+        """Sends a request and waits for a response. Returns (err, data)."""
         self.send_frame(t, payload)
         rt, rp = self.recv_frame()
         if len(rp) == 0:
-            raise IOError("Protokollfehler: leere Antwort")
+            raise IOError("Protocol error: empty response")
         err = rp[0]
         return err, rp[1:]
 
@@ -251,15 +251,15 @@ class YukiModuleClient:
     def get_pubkey(self) -> Tuple[int, bytes]:
         err, data = self.request(CMD_GET_PUBKEY)
         if len(data) != 64:
-            self.log.warning("PubKey-Länge unerwartet: %d", len(data))
+            self.log.warning("PubKey-lenght unexpected: %d", len(data))
         return err, data
 
     def set_value(self, param_id: int, vtype: int, data: bytes, read_only: bool = False) -> int:
-        # Payload gemäß CMD_SET
+        # Payload according to CMD_SET
         flags = 0x10 if read_only else 0x00
         if vtype in (TYPE_STRING, TYPE_BIN):
             if len(data) > (YUKI_MODULE_MAX_TLV_LENGTH - 6):
-                raise ValueError("Daten zu lang")
+                raise ValueError("Data too long")
             payload = struct.pack(">HBBBH", param_id, flags, vtype, 0, 0)  # Platzhalter für Länge?
             # Korrigiert: ID (2), Flags (1), Type (1), Len (2), Data
             payload = struct.pack(">HBBH", param_id, flags, vtype, len(data)) + data
@@ -267,7 +267,7 @@ class YukiModuleClient:
             return err
         else:
             if len(data) > (YUKI_MODULE_MAX_TLV_LENGTH - 4):
-                raise ValueError("Daten zu lang")
+                raise ValueError("Data too long")
             payload = struct.pack(">HBB", param_id, flags, vtype) + data
             err, _ = self.request(CMD_SET, payload)
             return err
@@ -275,7 +275,7 @@ class YukiModuleClient:
     # ------------- Geolocation -------------
 
     def geo_request(self) -> None:
-        """Sendet Geolocation-Anfrage. Es folgt KEINE Sofortantwort."""
+        """Sends a geolocation request. There is NO immediate response."""
         self.send_frame(CMD_GEO_REQ, b"")
 
     def _decode_geo(self, p: bytes) -> Optional[YukiModuleGeo]:
@@ -295,8 +295,8 @@ class YukiModuleClient:
 
     def poll_once(self) -> bool:
         """
-        Liest ein einzelnes eingehendes Frame und verarbeitet es.
-        Gibt True zurück, wenn ein Frame erfolgreich verarbeitet wurde.
+        Reads a single incoming frame and processes it.
+        Returns True if a frame was processed successfully.
         """
         try:
             t, p = self.recv_frame()
@@ -311,15 +311,15 @@ class YukiModuleClient:
             if geo:
                 self.geo_callback(geo)
         elif t == CMD_SET:
-            # Optional: hier könnten eingehende SETs geloggt werden
-            self.log.info("Eingehendes SET: %s", p.hex())
+            # Optional: incoming SETs could be logged here
+            self.log.info("Incoming SET: %s", p.hex())
         else:
-            self.log.debug("Unerwarteter Typ: 0x%02X (len=%d)", t, len(p))
+            self.log.debug("Unexpected type: 0x%02X (len=%d)", t, len(p))
         return True
 
     def poll_loop(self, duration: Optional[float] = None) -> None:
         """
-        Endlosschleife (oder 'duration' Sekunden) zum Empfang asynchroner Frames.
+        Endless loop (or 'duration' seconds) to receive asynchronous frames.
         """
         start = time.time()
         while True:
@@ -334,7 +334,7 @@ class YukiModuleClient:
             pass
 
 # ---------------------------------------------------------------------
-# Typ-Helfer für CLI
+# Type helpers for CLI
 # ---------------------------------------------------------------------
 
 def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
@@ -344,28 +344,28 @@ def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
     if t in ("i8", "int8"):
         v = int(value, 0)
         if not -128 <= v <= 127:
-            raise ValueError("int8 außerhalb des Bereichs")
+            raise ValueError("int8 out of range")
         return TYPE_INT8, struct.pack("b", v)
     if t in ("u16", "uint16"):
         return TYPE_UINT16, struct.pack(">H", int(value, 0) & 0xFFFF)
     if t in ("i16", "int16"):
         v = int(value, 0)
         if not -32768 <= v <= 32767:
-            raise ValueError("int16 außerhalb des Bereichs")
+            raise ValueError("int16 out of range")
         return TYPE_INT16, struct.pack(">h", v)
     if t in ("u32", "uint32"):
         return TYPE_UINT32, struct.pack(">I", int(value, 0) & 0xFFFFFFFF)
     if t in ("i32", "int32"):
         v = int(value, 0)
         if not -2147483648 <= v <= 2147483647:
-            raise ValueError("int32 außerhalb des Bereichs")
+            raise ValueError("int32 out of range")
         return TYPE_INT32, struct.pack(">i", v)
     if t in ("u64", "uint64"):
         return TYPE_UINT64, struct.pack(">Q", int(value, 0) & 0xFFFFFFFFFFFFFFFF)
     if t in ("i64", "int64"):
         v = int(value, 0)
         if not -9223372036854775808 <= v <= 9223372036854775807:
-            raise ValueError("int64 außerhalb des Bereichs")
+            raise ValueError("int64 out of range")
         return TYPE_IINT64, struct.pack(">q", v)
     if t in ("bool", "boolean"):
         bv = value.lower()
@@ -382,18 +382,18 @@ def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
         # value erwartet hex ohne Spaces, z. B. "DEADBEEF"
         v = bytes.fromhex(value.replace(" ", ""))
         return TYPE_BIN, v
-    raise ValueError(f"unbekannter Typ: {tname}")
+    raise ValueError(f"unknown type: {tname}")
 
 # ---------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="YUKI_MODULE Python Client (Debug)")
-    ap.add_argument("-p", "--port", required=True, help="serielle Schnittstelle (z. B. /dev/ttyUSB0 oder COM5)")
+    ap = argparse.ArgumentParser(description="YUKI-Module Python Client (Debug)")
+    ap.add_argument("-p", "--port", required=True, help="serial port (e.g. /dev/ttyUSB0 or COM5)")
     ap.add_argument("-b", "--baud", type=int, default=115200, help="Baudrate (Default: 115200)")
-    ap.add_argument("--timeout", type=float, default=1.0, help="Read/Write Timeout in Sekunden (Default: 1.0)")
-    ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (einmal oder mehrfach)")
+    ap.add_argument("--timeout", type=float, default=1.0, help="Read/Write timeout in seconds (Default: 1.0)")
+    ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (once or multiple times)")
 
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -405,12 +405,12 @@ def main(argv=None) -> int:
     sub.add_parser("pubkey")
     sub.add_parser("geo-request")
     poll_p = sub.add_parser("poll")
-    poll_p.add_argument("--secs", type=float, default=None, help="Optional Begrenzung in Sekunden")
+    poll_p.add_argument("--secs", type=float, default=None, help="Optional limit in seconds")
 
-    set_p = sub.add_parser("set", help="Wert setzen")
-    set_p.add_argument("param_id", help="Parameter-ID (z. B. 0x1234)")
-    set_p.add_argument("type", help="Datentyp (uint8,int16,string,bin,...)")
-    set_p.add_argument("value", help="Wert (bei bin: Hex, z. B. DEADBEEF)")
+    set_p = sub.add_parser("set", help="set Value")
+    set_p.add_argument("param_id", help="Parameter-ID (e.g. 0x1234)")
+    set_p.add_argument("type", help="Datatype (uint8,int16,string,bin,...)")
+    set_p.add_argument("value", help="Value (for bin: use Hex, e.g. DEADBEEF)")
     set_p.add_argument("--ro", action="store_true", help="read-only Flag setzen")
 
     args = ap.parse_args(argv)
@@ -422,9 +422,9 @@ def main(argv=None) -> int:
     elif args.verbose >= 2:
         lvl = logging.DEBUG
     logging.basicConfig(level=lvl, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    log = logging.getLogger("yuki_module")
+    log = logging.getLogger("yuki-module")
 
-    # Callback für Geolocation
+    # Callback for geolocation
     def on_geo(g: YukiModuleGeo) -> None:
         lat = g.lat_e7 / 1e7
         lon = g.lon_e7 / 1e7
@@ -434,7 +434,7 @@ def main(argv=None) -> int:
     try:
         cli = YukiModuleClient(args.port, baud=args.baud, timeout=args.timeout, geo_callback=on_geo, logger=log)
     except Exception as e:
-        log.error("Konnte Port nicht öffnen: %s", e)
+        log.error("Couldn't open port: %s", e)
         return 2
 
     rc = 0
@@ -462,7 +462,7 @@ def main(argv=None) -> int:
                 print("PUBKEY:", ERR_STR.get(e, hex(e)))
         elif args.cmd == "geo-request":
             cli.geo_request()
-            print("GEO-Request gesendet. Nutze 'poll', um Reports zu empfangen.")
+            print("GEO-Request sent. Use 'poll', to receive reports.")
         elif args.cmd == "poll":
             cli.poll_loop(duration=args.secs)
         elif args.cmd == "set":
@@ -472,7 +472,7 @@ def main(argv=None) -> int:
                 e = cli.set_value(pid, vtype, data, read_only=args.ro)
                 print("SET:", ERR_STR.get(e, hex(e)))
             except Exception as ex:
-                log.error("SET fehlgeschlagen: %s", ex)
+                log.error("SET failed: %s", ex)
                 rc = 3
         else:
             ap.print_help()

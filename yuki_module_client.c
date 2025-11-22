@@ -2,7 +2,7 @@
 #include <string.h>
 #include <errno.h>
 
-/* Zustandsverwaltung */
+/* State management */
 static struct {
     void*          ctx;
     yuki_module_read_fn   read;
@@ -12,7 +12,7 @@ static struct {
     bool           ready;
 } g;
 
-/* CRC-16/CCITT-FALSE (Poly 0x1021, Init 0xFFFF, kein Final-XOR) */
+/* CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF, no final XOR) */
 static uint16_t crc16_ccitt_false(const uint8_t* data, size_t len)
 {
     uint16_t crc = 0xFFFF;
@@ -37,7 +37,7 @@ static void unpack_header(const uint8_t* h, uint8_t* t, uint16_t* l)
     *l = (uint16_t)(((h[0] & 0x01) << 8) | h[1]);
 }
 
-/* IO-Helfer */
+/* I/O helpers */
 static bool io_read_all(void* ctx, yuki_module_read_fn rf, uint8_t* buf, size_t len)
 {
     size_t off = 0;
@@ -59,7 +59,7 @@ static bool io_write_all(void* ctx, yuki_module_write_fn wf, const uint8_t* buf,
     return true;
 }
 
-/* Frame Senden/Empfangen (mit CRC-Pflicht) */
+/* Sending/receiving frames (CRC required) */
 static bool send_frame(const YukiModuleMsg* m)
 {
     if (m->t > 0x7F || m->l > YUKI_MODULE_MAX_TLV_LENGTH) { errno = EINVAL; return false; }
@@ -101,7 +101,7 @@ static bool recv_frame(YukiModuleMsg* m)
     return true;
 }
 
-/* Big-Endian Helfer für 32 Bit */
+/* Big-endian helpers for 32-bit values */
 static uint32_t be32u(const uint8_t* p)
 {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
@@ -111,7 +111,7 @@ static int32_t be32s(const uint8_t* p)
     return (int32_t)be32u(p);
 }
 
-/* Öffentliche API */
+/* Public API */
 bool yuki_module_init(const YukiModuleInterface* iface, void* reserved)
 {
     (void)reserved;
@@ -151,7 +151,7 @@ bool yuki_module_request(const YukiModuleMsg* out, YukiModuleMsg* in_msg, YukiMo
     return true;
 }
 
-/* Eingangsframe verarbeiten: SET und GEO_RPT werden an Callbacks gegeben. */
+/* Process incoming frame: SET and GEO_RPT are forwarded to callbacks. */
 bool yuki_module_poll_once(void)
 {
     YukiModuleMsg m;
@@ -184,8 +184,8 @@ bool yuki_module_poll_once(void)
     }
 
     if (m.t == CMD_GEO_RPT && g.geo_cb) {
-        /* Geolocation Report – festes Binärformat (Big-Endian):
-           Offset | Größe | Feld
+        /* Geolocation report – fixed binary format (big-endian):
+           Offset | Size  | Field
            0     | 1     | fix_type (0=none,1=2D,2=3D)
            1     | 1     | sats
            2     | 4     | ts_utc
@@ -193,7 +193,7 @@ bool yuki_module_poll_once(void)
            10    | 4     | lon_e7   (signed)
            14    | 4     | alt_cm   (signed)
            18    | 4     | hdop*100 (unsigned)
-           Gesamt: 22 Byte
+           Total: 22 bytes
         */
         if (m.l == 22) {
             YukiModuleGeo gfix;
@@ -212,7 +212,7 @@ bool yuki_module_poll_once(void)
     return true;
 }
 
-/* High-Level Helfer */
+/* High-level helpers */
 bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bool read_only)
 {
     YukiModuleMsg m; memset(&m, 0, sizeof m);
@@ -314,11 +314,11 @@ bool yuki_module_get_iccid(char* out, size_t out_len)
     return true;
 }
 
-/* Geolocation-API */
+/* Geolocation API */
 bool yuki_module_geo_request(void)
 {
     YukiModuleMsg m = { .t = CMD_GEO_REQ, .l = 0 };
-    /* Keine synchrone Antwort erwartet; nur senden. */
+    /* No synchronous response expected; just send. */
     return yuki_module_send(&m);
 }
 
