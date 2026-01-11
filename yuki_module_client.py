@@ -28,11 +28,15 @@ Note:
 from __future__ import annotations
 
 import argparse
+import cmd
+import shlex
+import traceback
 import logging
 import struct
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Optional, Tuple
 
 try:
@@ -57,6 +61,7 @@ CMD_VERSION    = 0x06
 CMD_STATUS     = 0x07
 CMD_GEO_REQ    = 0x08
 CMD_GEO_RPT    = 0x09
+CMD_GET_TIME   = 0x0A
 
 # Types
 TYPE_INT32   = 0x01
@@ -80,6 +85,9 @@ ERR_OK        = 0x00
 ERR_CMD       = 0x01
 ERR_ARG       = 0x02
 ERR_BUSY      = 0x03
+ERR_SIM       = 0x10
+ERR_NET       = 0x11
+ERR_CONN      = 0x12
 ERR_INTERNAL  = 0xFF
 
 ERR_STR = {
@@ -87,6 +95,9 @@ ERR_STR = {
     ERR_CMD: "CMD",
     ERR_ARG: "ARG",
     ERR_BUSY: "BUSY",
+    ERR_SIM: "SIM ERROR",
+    ERR_NET: "NOT REGISTERED",
+    ERR_CONN: "NOT CONNECTED",
     ERR_INTERNAL: "INTERNAL",
 }
 
@@ -254,6 +265,15 @@ class YukiModuleClient:
             self.log.warning("PubKey-lenght unexpected: %d", len(data))
         return err, data
 
+    def get_time(self) -> Tuple[int, Optional[int]]:
+        err, data = self.request(CMD_GET_TIME)
+        if err != ERR_OK:
+            return err, None
+        if len(data) < 4:
+            raise IOError(f"Protocol error: CMD_GET_TIME payload too short ({len(data)} bytes)")
+        (ts,) = struct.unpack(">I", data[:4])
+        return err, ts
+
     def set_value(self, param_id: int, vtype: int, data: bytes, read_only: bool = False) -> int:
         # Payload according to CMD_SET
         flags = 0x10 if read_only else 0x00
@@ -388,21 +408,224 @@ def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
 # CLI
 # ---------------------------------------------------------------------
 
-def main(argv=None) -> int:
+class CLIError(Exception):
+    """Expected user input / usage error (no stack trace unless --debug)."""
+
+
+def try_parse_type_and_value(tname: str, value: str) -> Tuple[Optional[Tuple[int, bytes]], str]:
+    """
+    Wrapper around parse_type_and_value that never raises.
+    Returns ((vtype, data), "") on success, or (None, "reason") on error.
+    """
+    try:
+        vtype, data = parse_type_and_value(tname, value)
+        return (vtype, data), ""
+    except Exception as ex:
+        return None, str(ex)
+
+
+def _print_err(msg: str) -> None:
+    print(f"Error: {msg}", file=sys.stderr)
+
+
+def _print_info(msg: str) -> None:
+    print(msg)
+
+
+def _format_pubkey(pk: bytes) -> str:
+    # 64 bytes => 128 hex chars
+    hx = pk.hex()
+    if not hx:
+        return ""
+    # group into 32-char chunks for readability
+    return "\n".join(hx[i:i+32] for i in range(0, len(hx), 32))
+
+
+class YukiShell(cmd.Cmd):
+    intro = (
+        "YUKI-Module interactive shell. Type 'help' to list commands.\n"
+        "Tip: 'poll 10' keeps reading for 10 seconds.\n"
+    )
+    prompt = "yuki> "
+
+    def __init__(self, cli: YukiModuleClient, log: logging.Logger, debug: bool = False) -> None:
+        super().__init__()
+        self.cli = cli
+        self.log = log
+        self.debug = debug
+
+    # ----- helpers -----
+
+    def _safe_call(self, fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except (TimeoutError, IOError, OSError) as ex:
+            _print_err(str(ex))
+        except KeyboardInterrupt:
+            _print_err("Interrupted.")
+        except Exception as ex:
+            _print_err(str(ex))
+            if self.debug:
+                traceback.print_exc()
+        return None
+
+    def emptyline(self) -> bool:
+        return False  # do nothing on empty line
+
+    def default(self, line: str) -> None:
+        _print_err(f"Unknown command: {line.strip()!r}. Type 'help'.")
+
+    # ----- basic -----
+
+    def do_exit(self, arg: str) -> bool:
+        """Exit the shell."""
+        return True
+
+    def do_quit(self, arg: str) -> bool:
+        """Exit the shell."""
+        return True
+
+    def do_EOF(self, arg: str) -> bool:
+        """Exit the shell (Ctrl-D)."""
+        _print_info("")  # newline
+        return True
+
+    # ----- module commands -----
+
+    def do_status(self, arg: str) -> None:
+        """status  -> query module status"""
+        r = self._safe_call(self.cli.status)
+        if r is not None:
+            _print_info(f"STATUS: {ERR_STR.get(r, hex(r))}")
+
+    def do_sync(self, arg: str) -> None:
+        """sync  -> perform sync command"""
+        r = self._safe_call(self.cli.sync)
+        if r is not None:
+            _print_info(f"SYNC: {ERR_STR.get(r, hex(r))}")
+
+    def do_version(self, arg: str) -> None:
+        """version  -> get firmware version"""
+        r = self._safe_call(self.cli.version)
+        if r is not None:
+            e, v = r
+            if e == ERR_OK:
+                _print_info(f"VERSION: {v}")
+            else:
+                _print_info(f"VERSION: {ERR_STR.get(e, hex(e))}")
+
+    def do_imei(self, arg: str) -> None:
+        """imei  -> get IMEI"""
+        r = self._safe_call(self.cli.get_imei)
+        if r is not None:
+            e, v = r
+            _print_info(f"IMEI: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
+    def do_iccid(self, arg: str) -> None:
+        """iccid  -> get ICCID"""
+        r = self._safe_call(self.cli.get_iccid)
+        if r is not None:
+            e, v = r
+            _print_info(f"ICCID: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
+    def do_pubkey(self, arg: str) -> None:
+        """pubkey  -> get public key"""
+        r = self._safe_call(self.cli.get_pubkey)
+        if r is not None:
+            e, pk = r
+            if e == ERR_OK:
+                _print_info("PUBKEY:\n" + _format_pubkey(pk))
+            else:
+                _print_info(f"PUBKEY: {ERR_STR.get(e, hex(e))}")
+
+    def do_time(self, arg: str) -> None:
+        """time  -> get device time"""
+        r = self._safe_call(self.cli.get_time)
+        if r is not None:
+            e, ts = r
+            if e == ERR_OK and ts is not None:
+                _print_info("TIME: " + str(datetime.fromtimestamp(ts)))
+            else:
+                _print_info(f"TIME: {ERR_STR.get(e, hex(e))}")
+
+    def do_geo_request(self, arg: str) -> None:
+        """geo_request  -> request geolocation (async; use poll to receive reports)"""
+        r = self._safe_call(self.cli.geo_request)
+        if r is not None:
+            _print_info("GEO-Request sent. Use 'poll' to receive reports.")
+
+    def do_poll(self, arg: str) -> None:
+        """poll [seconds]  -> read incoming frames; prints GEO reports"""
+        secs = None
+        a = arg.strip()
+        if a:
+            try:
+                secs = float(a)
+                if secs <= 0:
+                    raise ValueError()
+            except Exception:
+                _print_err("Usage: poll [seconds]  (seconds must be > 0)")
+                return
+        self._safe_call(self.cli.poll_loop, duration=secs)
+
+    def do_set(self, arg: str) -> None:
+        """set <param_id> <type> <value> [--ro]"""
+        try:
+            parts = shlex.split(arg)
+        except Exception as ex:
+            _print_err(f"Could not parse arguments: {ex}")
+            return
+
+        if not parts or len(parts) < 3:
+            _print_err("Usage: set <param_id> <type> <value> [--ro]")
+            return
+
+        ro = False
+        if "--ro" in parts:
+            ro = True
+            parts = [p for p in parts if p != "--ro"]
+
+        if len(parts) < 3:
+            _print_err("Usage: set <param_id> <type> <value> [--ro]")
+            return
+
+        pid_s, tname, value = parts[0], parts[1], " ".join(parts[2:])
+
+        try:
+            pid = int(pid_s, 0)
+        except Exception:
+            _print_err(f"Invalid param_id: {pid_s!r} (use e.g. 0x1234 or 4660)")
+            return
+
+        parsed, err = try_parse_type_and_value(tname, value)
+        if parsed is None:
+            _print_err(err or "Invalid type/value")
+            return
+        vtype, data = parsed
+
+        r = self._safe_call(self.cli.set_value, pid, vtype, data, ro)
+        if r is not None:
+            _print_info(f"SET: {ERR_STR.get(r, hex(r))}")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="YUKI-Module Python Client (Debug)")
     ap.add_argument("-p", "--port", required=True, help="serial port (e.g. /dev/ttyUSB0 or COM5)")
     ap.add_argument("-b", "--baud", type=int, default=115200, help="Baudrate (Default: 115200)")
     ap.add_argument("--timeout", type=float, default=1.0, help="Read/Write timeout in seconds (Default: 1.0)")
     ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (once or multiple times)")
+    ap.add_argument("--debug", action="store_true", help="Show stack traces for unexpected errors")
 
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
 
+    sub.add_parser("shell", help="interactive mode (default)")
     sub.add_parser("status")
     sub.add_parser("sync")
     sub.add_parser("version")
     sub.add_parser("imei")
     sub.add_parser("iccid")
     sub.add_parser("pubkey")
+    sub.add_parser("time")
     sub.add_parser("geo-request")
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--secs", type=float, default=None, help="Optional limit in seconds")
@@ -413,6 +636,98 @@ def main(argv=None) -> int:
     set_p.add_argument("value", help="Value (for bin: use Hex, e.g. DEADBEEF)")
     set_p.add_argument("--ro", action="store_true", help="read-only Flag setzen")
 
+    return ap
+
+
+def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.Logger, debug: bool) -> int:
+    """
+    Executes exactly one command. Must NOT raise.
+    """
+    try:
+        if args.cmd == "status":
+            e = cli.status()
+            print("STATUS:", ERR_STR.get(e, hex(e)))
+            return 0
+
+        if args.cmd == "sync":
+            e = cli.sync()
+            print("SYNC:", ERR_STR.get(e, hex(e)))
+            return 0
+
+        if args.cmd == "version":
+            e, v = cli.version()
+            print("VERSION:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "imei":
+            e, v = cli.get_imei()
+            print("IMEI:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "iccid":
+            e, v = cli.get_iccid()
+            print("ICCID:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "pubkey":
+            e, pk = cli.get_pubkey()
+            if e == ERR_OK:
+                print("PUBKEY:\n" + _format_pubkey(pk))
+                return 0
+            print("PUBKEY:", ERR_STR.get(e, hex(e)))
+            return 3
+
+        if args.cmd == "time":
+            e, ts = cli.get_time()
+            if e == ERR_OK and ts is not None:
+                print("TIME:", datetime.fromtimestamp(ts))
+                return 0
+            print("TIME:", ERR_STR.get(e, hex(e)))
+            return 3
+
+        if args.cmd == "geo-request":
+            cli.geo_request()
+            print("GEO-Request sent. Use 'poll' to receive reports.")
+            return 0
+
+        if args.cmd == "poll":
+            cli.poll_loop(duration=args.secs)
+            return 0
+
+        if args.cmd == "set":
+            try:
+                pid = int(args.param_id, 0)
+            except Exception:
+                _print_err(f"Invalid param_id: {args.param_id!r} (use e.g. 0x1234 or 4660)")
+                return 2
+
+            parsed, perr = try_parse_type_and_value(args.type, args.value)
+            if parsed is None:
+                _print_err(perr or "Invalid type/value")
+                return 2
+            vtype, data = parsed
+            e = cli.set_value(pid, vtype, data, read_only=args.ro)
+            print("SET:", ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        _print_err("No command given. Use 'shell' or run with -h for help.")
+        return 2
+
+    except KeyboardInterrupt:
+        _print_err("Interrupted.")
+        return 130
+    except (TimeoutError, IOError, OSError) as ex:
+        _print_err(str(ex))
+        return 3
+    except Exception as ex:
+        _print_err(str(ex))
+        if debug:
+            traceback.print_exc()
+        return 3
+
+
+def main(argv=None) -> int:
+    ap = build_arg_parser()
     args = ap.parse_args(argv)
 
     # Logging
@@ -421,65 +736,41 @@ def main(argv=None) -> int:
         lvl = logging.INFO
     elif args.verbose >= 2:
         lvl = logging.DEBUG
-    logging.basicConfig(level=lvl, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    log = logging.getLogger("yuki-module")
+    logging.basicConfig(level=lvl, format="%(levelname)s: %(message)s")
+    log = logging.getLogger("yuki")
 
-    # Callback for geolocation
     def on_geo(g: YukiModuleGeo) -> None:
         lat = g.lat_e7 / 1e7
         lon = g.lon_e7 / 1e7
         alt = g.alt_cm / 100.0
-        print(f"GEO: fix={g.fix_type} sats={g.sats} t={g.ts_utc} lat={lat:.7f} lon={lon:.7f} alt={alt:.2f}m hdop={g.hdop_centi/100.0:.2f}")
+        print(
+            f"GEO: fix={g.fix_type} sats={g.sats} ts={g.ts_utc} "
+            f"lat={lat:.7f} lon={lon:.7f} alt={alt:.2f}m hdop={g.hdop_centi/100.0:.2f}"
+        )
 
     try:
         cli = YukiModuleClient(args.port, baud=args.baud, timeout=args.timeout, geo_callback=on_geo, logger=log)
     except Exception as e:
-        log.error("Couldn't open port: %s", e)
+        _print_err(f"Couldn't open port: {e}")
+        if args.debug:
+            traceback.print_exc()
         return 2
 
-    rc = 0
     try:
-        if args.cmd == "status":
-            e = cli.status()
-            print("STATUS:", ERR_STR.get(e, hex(e)))
-        elif args.cmd == "sync":
-            e = cli.sync()
-            print("SYNC:", ERR_STR.get(e, hex(e)))
-        elif args.cmd == "version":
-            e, s = cli.version()
-            print("VERSION:", ERR_STR.get(e, hex(e)), s if e == ERR_OK else "")
-        elif args.cmd == "imei":
-            e, s = cli.get_imei()
-            print("IMEI:", ERR_STR.get(e, hex(e)), s if e == ERR_OK else "")
-        elif args.cmd == "iccid":
-            e, s = cli.get_iccid()
-            print("ICCID:", ERR_STR.get(e, hex(e)), s if e == ERR_OK else "")
-        elif args.cmd == "pubkey":
-            e, b = cli.get_pubkey()
-            if e == ERR_OK:
-                print("PUBKEY:", b.hex())
-            else:
-                print("PUBKEY:", ERR_STR.get(e, hex(e)))
-        elif args.cmd == "geo-request":
-            cli.geo_request()
-            print("GEO-Request sent. Use 'poll', to receive reports.")
-        elif args.cmd == "poll":
-            cli.poll_loop(duration=args.secs)
-        elif args.cmd == "set":
+        # Default to interactive shell if no command or 'shell'
+        if not args.cmd or args.cmd == "shell":
             try:
-                pid = int(args.param_id, 0)
-                vtype, data = parse_type_and_value(args.type, args.value)
-                e = cli.set_value(pid, vtype, data, read_only=args.ro)
-                print("SET:", ERR_STR.get(e, hex(e)))
-            except Exception as ex:
-                log.error("SET failed: %s", ex)
-                rc = 3
-        else:
-            ap.print_help()
+                YukiShell(cli, log=log, debug=args.debug).cmdloop()
+                return 0
+            except KeyboardInterrupt:
+                _print_err("Interrupted.")
+                return 130
+
+        return run_one_shot(cli, args, log, debug=args.debug)
+
     finally:
         cli.close()
 
-    return rc
 
 if __name__ == "__main__":
     sys.exit(main())

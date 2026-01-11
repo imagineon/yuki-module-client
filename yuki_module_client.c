@@ -314,6 +314,22 @@ bool yuki_module_get_iccid(char* out, size_t out_len)
     return true;
 }
 
+
+bool yuki_module_get_time(uint32_t* out)
+{
+    if (!out) { errno = EINVAL; return false; }
+    YukiModuleMsg m = { .t = CMD_GET_TIME, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    if (e != ERR_OK) { errno = EPROTO; return false; }
+    if (r.l <= 1) { out[0] = '\0'; return true; }
+    size_t n = (size_t)(r.l - 1);
+    if (n >= (sizeof(uint32_t) - 1)) n = sizeof(uint32_t) - 1;
+    memcpy(out, &r.v[1], n);
+    out[n] = '\0';
+    return true;
+}
+
 /* Geolocation API */
 bool yuki_module_geo_request(void)
 {

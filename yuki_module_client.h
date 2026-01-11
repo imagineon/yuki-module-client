@@ -52,7 +52,8 @@ typedef enum {
     CMD_VERSION    = 0x06,
     CMD_STATUS     = 0x07,
     CMD_GEO_REQ    = 0x08,
-    CMD_GEO_RPT    = 0x09
+    CMD_GEO_RPT    = 0x09,
+    CMT_GET_TIME   = 0x0A
 } YukiModuleCmd;
 
 /* Data types in payload (TYPE_*) */
