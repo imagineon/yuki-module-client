@@ -35,12 +35,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <sys/types.h> /* ssize_t */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define LUMI_MAX_TLV_LENGTH 511
+#define YUKI_MODULE_MAX_TLV_LENGTH 511
 
 /* Commands (Type) */
 typedef enum {
@@ -53,7 +54,7 @@ typedef enum {
     CMD_STATUS     = 0x07,
     CMD_GEO_REQ    = 0x08,
     CMD_GEO_RPT    = 0x09,
-    CMT_GET_TIME   = 0x0A
+    CMD_GET_TIME   = 0x0A
 } YukiModuleCmd;
 
 /* Data types in payload (TYPE_*) */
@@ -130,7 +131,7 @@ typedef struct {
 typedef struct {
     uint8_t  t;
     uint16_t l;
-    uint8_t  v[LUMI_MAX_TLV_LENGTH];
+    uint8_t  v[YUKI_MODULE_MAX_TLV_LENGTH];
 } YukiModuleMsg;
 
 /* Initialisation – must be called before all other functions */
@@ -151,13 +152,14 @@ bool yuki_module_status(YukiModuleErr* out_status);
 bool yuki_module_get_pubkey(uint8_t out64[64]);
 bool yuki_module_get_imei(char* out, size_t out_len);
 bool yuki_module_get_iccid(char* out, size_t out_len);
+bool yuki_module_get_time(uint32_t* out_unix_ts_utc);
 
 /* Geolocation API */
 bool yuki_module_geo_request(void);                 /* Send CMD_GEO_REQ; report is delivered asynchronously */
-bool yuki_module_set_geo_callback(lumi_on_geo_fn);  /* Set or change callback afterwards */
+bool yuki_module_set_geo_callback(yuki_module_on_geo_fn cb);  /* Set or change callback afterwards */
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* LUMI_CLIENT_H */
+#endif /* YUKI_MODULE_CLIENT_H */

@@ -85,6 +85,10 @@ yuki_module_get_imei(imei, sizeof imei);
 yuki_module_get_iccid(iccid, sizeof iccid);
 yuki_module_version(ver, sizeof ver);
 
+// Read module time (Unix time UTC)
+uint32_t ts_utc;
+yuki_module_get_time(&ts_utc);
+
 // Public key (64 B)
 uint8_t pubkey[64];
 yuki_module_get_pubkey(pubkey);
@@ -144,6 +148,7 @@ If the CRC check fails, the library automatically discards the frame.
 | 0x07 | CMD_STATUS | Host → module | Status (error code) |
 | 0x08 | CMD_GEO_REQ | Host → module | Request geolocation |
 | 0x09 | CMD_GEO_RPT | Module → host | Geolocation report (asynchronous) |
+| 0x0A | CMD_GET_TIME | Host → module | Read module time (Unix time, UTC) |
 
 **Synchronous response format:**  
 The first byte of the response payload contains the error code (`ERR_OK`, `ERR_CMD`, `ERR_ARG`, `ERR_BUSY`, `ERR_INTERNAL`).  
@@ -241,7 +246,7 @@ pip install pyserial
 
 **Command-line usage**
 
-Typical calls:
+Typical one-shot calls:
 
 ```bash
 python yuki_module_client.py --port /dev/ttyUSB0 status
@@ -249,8 +254,15 @@ python yuki_module_client.py -p /dev/ttyUSB0 version
 python yuki_module_client.py -p /dev/ttyUSB0 imei
 python yuki_module_client.py -p /dev/ttyUSB0 iccid
 python yuki_module_client.py -p /dev/ttyUSB0 pubkey
+python yuki_module_client.py -p /dev/ttyUSB0 time
 python yuki_module_client.py -p /dev/ttyUSB0 geo-request
 python yuki_module_client.py -p /dev/ttyUSB0 poll --secs 30
+```
+
+Interactive shell (default when no subcommand is given):
+
+```bash
+python yuki_module_client.py -p /dev/ttyUSB0
 ```
 
 Available subcommands include (excerpt):
@@ -259,9 +271,12 @@ Available subcommands include (excerpt):
 - `sync` – trigger a cloud synchronisation
 - `version` – read the firmware version
 - `imei`, `iccid`, `pubkey` – read IMEI, ICCID and the 64-byte public key
+- `time` – read current module time (`CMD_GET_TIME`, Unix time UTC)
 - `geo-request` – send a geolocation request (`CMD_GEO_REQ`)
 - `poll` – continuously read and decode frames (including `CMD_GEO_RPT`)
 - `set` – write a value by parameter ID and type
+
+If you start the tool without a subcommand (or with `shell`), it enters an interactive REPL where you can run multiple commands in one session.
 
 All commands use the same error codes as the C library (`ERR_OK`, `ERR_CMD`, …) and print them in a human-readable form.
 
