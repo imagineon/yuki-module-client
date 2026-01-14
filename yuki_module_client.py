@@ -59,9 +59,10 @@ CMD_SET        = 0x04
 CMD_SYNC       = 0x05
 CMD_VERSION    = 0x06
 CMD_STATUS     = 0x07
-CMD_GEO_REQ    = 0x08
+CMD_GPS_ENABLE = 0x08
 CMD_GEO_RPT    = 0x09
 CMD_GET_TIME   = 0x0A
+CMD_GPS_DISABLE = 0x0B
 
 # Types
 TYPE_INT32   = 0x01
@@ -294,9 +295,13 @@ class YukiModuleClient:
 
     # ------------- Geolocation -------------
 
-    def geo_request(self) -> None:
+    def geo_enable(self, enable: int) -> None:
         """Sends a geolocation request. There is NO immediate response."""
-        self.send_frame(CMD_GEO_REQ, b"")
+        if enable not in (0, 1):
+            raise ValueError("enable must be 0 or 1")
+        err, _ = self.request(CMD_GPS_ENABLE, bytes([enable]))
+        return err
+
 
     def _decode_geo(self, p: bytes) -> Optional[YukiModuleGeo]:
         if len(p) != 22:
@@ -548,11 +553,16 @@ class YukiShell(cmd.Cmd):
             else:
                 _print_info(f"TIME: {ERR_STR.get(e, hex(e))}")
 
-    def do_geo_request(self, arg: str) -> None:
-        """geo_request  -> request geolocation (async; use poll to receive reports)"""
-        r = self._safe_call(self.cli.geo_request)
+    def do_geo_enable(self, arg: str) -> None:
+        """geo-enable <0|1>  -> enable/disable geolocation (async; use poll to receive reports)"""
+        a = arg.strip()
+        if a not in ("0", "1"):
+            _print_err("Usage: geo-enable <0|1>")
+            return
+        enable = int(a)
+        r = self._safe_call(self.cli.geo_enable, enable)
         if r is not None:
-            _print_info("GEO-Request sent. Use 'poll' to receive reports.")
+            _print_info(f"GEO {'enabled. Use `poll` to receive reports.' if enable else 'disabled'}")
 
     def do_poll(self, arg: str) -> None:
         """poll [seconds]  -> read incoming frames; prints GEO reports"""
@@ -626,7 +636,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("iccid")
     sub.add_parser("pubkey")
     sub.add_parser("time")
-    sub.add_parser("geo-request")
+    geo_p = sub.add_parser("geo_enable", help="enable/disable geolocation")
+    geo_p.add_argument("enable", type=int, choices=[0, 1], help="1=enable, 0=disable")
+
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--secs", type=float, default=None, help="Optional limit in seconds")
 
@@ -685,9 +697,9 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
             print("TIME:", ERR_STR.get(e, hex(e)))
             return 3
 
-        if args.cmd == "geo-request":
-            cli.geo_request()
-            print("GEO-Request sent. Use 'poll' to receive reports.")
+        if args.cmd == "geo_enable":
+            cli.geo_enable(args.enable)
+            print(f"GEO {'enabled' if args.enable else 'disabled'}. Use 'poll' to receive reports.")
             return 0
 
         if args.cmd == "poll":

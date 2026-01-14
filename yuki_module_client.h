@@ -52,7 +52,7 @@ typedef enum {
     CMD_SYNC       = 0x05,
     CMD_VERSION    = 0x06,
     CMD_STATUS     = 0x07,
-    CMD_GEO_REQ    = 0x08,
+    CMD_GEO_ENA    = 0x08,
     CMD_GEO_RPT    = 0x09,
     CMD_GET_TIME   = 0x0A
 } YukiModuleCmd;
@@ -155,7 +155,7 @@ bool yuki_module_get_iccid(char* out, size_t out_len);
 bool yuki_module_get_time(uint32_t* out_unix_ts_utc);
 
 /* Geolocation API */
-bool yuki_module_geo_request(void);                 /* Send CMD_GEO_REQ; report is delivered asynchronously */
+bool yuki_module_geo_enable(bool);       /* Send CMD_GEO_ENA; report is delivered asynchronously */
 bool yuki_module_set_geo_callback(yuki_module_on_geo_fn cb);  /* Set or change callback afterwards */
 
 #ifdef __cplusplus

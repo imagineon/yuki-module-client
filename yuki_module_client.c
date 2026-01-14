@@ -331,10 +331,12 @@ bool yuki_module_get_time(uint32_t* out)
 }
 
 /* Geolocation API */
-bool yuki_module_geo_request(void)
+bool yuki_module_geo_enable(uint8_t enable)
 {
-    YukiModuleMsg m = { .t = CMD_GEO_REQ, .l = 0 };
-    /* No synchronous response expected; just send. */
+    if (enable > 1) { errno = EINVAL; return false; }
+
+    YukiModuleMsg m = { .t = CMD_GPS_ENABLE /* oder euer richtiger CMD */, .l = 1 };
+    m.v[0] = enable;
     return yuki_module_send(&m);
 }
 
