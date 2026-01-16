@@ -62,7 +62,8 @@ CMD_STATUS     = 0x07
 CMD_GPS_ENABLE = 0x08
 CMD_GEO_RPT    = 0x09
 CMD_GET_TIME   = 0x0A
-CMD_GPS_DISABLE = 0x0B
+CMD_GPS_DISABLE = 0x0C
+CMD_SET_UUID    = 0x0B
 
 # Types
 TYPE_INT32   = 0x01
@@ -293,6 +294,11 @@ class YukiModuleClient:
             err, _ = self.request(CMD_SET, payload)
             return err
 
+    def set_uuid(self, value: int) -> int:
+        """Sends CMD_SET_UUID"""
+        payload = struct.pack(">I", value & 0xFFFFFFFF)
+        err, _ = self.request(CMD_SET_UUID, payload)
+        return err
     # ------------- Geolocation -------------
 
     def geo_enable(self, enable: int) -> None:
@@ -553,6 +559,22 @@ class YukiShell(cmd.Cmd):
             else:
                 _print_info(f"TIME: {ERR_STR.get(e, hex(e))}")
 
+    def do_set_uuid(self, arg: str) -> None:
+        """set_uuid <value> -> set UUID (uint32)"""
+        a = arg.strip()
+        if not a:
+            _print_err("Usage: set_uuid <value>")
+            return
+        try:
+            value = int(a, 0)
+        except ValueError:
+            _print_err(f"Inavalid value: {a!r}")
+            return
+        r = self._safe_call(self.cli.set_uuid, value)
+        if r is not None:
+            _print_info(f"SET_UUID: {ERR_STR.get(r, hex(r))}")
+
+
     def do_geo_enable(self, arg: str) -> None:
         """geo-enable <0|1>  -> enable/disable geolocation (async; use poll to receive reports)"""
         a = arg.strip()
@@ -626,6 +648,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (once or multiple times)")
     ap.add_argument("--debug", action="store_true", help="Show stack traces for unexpected errors")
 
+
     sub = ap.add_subparsers(dest="cmd")
 
     sub.add_parser("shell", help="interactive mode (default)")
@@ -641,6 +664,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--secs", type=float, default=None, help="Optional limit in seconds")
+
+    set_uuid_p = sub.add_parser("set_uuid", help="set UUID (uint32)")
+    set_uuid_p.add_argument("value", help="uint32 value (e.g. 0x12345678 or 305419896)")
 
     set_p = sub.add_parser("set", help="set Value")
     set_p.add_argument("param_id", help="Parameter-ID (e.g. 0x1234)")
@@ -701,6 +727,16 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
             cli.geo_enable(args.enable)
             print(f"GEO {'enabled' if args.enable else 'disabled'}. Use 'poll' to receive reports.")
             return 0
+        
+        if args.cmd == "set_uuid":
+            try:
+                value = int(args.value, 0)
+            except ValueError:
+                _print_err(f"Invalid value: {args.value!r}")
+                return 2
+            e = cli.set_uuid(value)
+            print("SET_UUID:", ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
 
         if args.cmd == "poll":
             cli.poll_loop(duration=args.secs)
