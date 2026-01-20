@@ -62,7 +62,6 @@ CMD_STATUS     = 0x07
 CMD_GPS_ENABLE = 0x08
 CMD_GEO_RPT    = 0x09
 CMD_GET_TIME   = 0x0A
-CMD_GPS_DISABLE = 0x0C
 CMD_SET_UUID    = 0x0B
 
 # Types
@@ -263,7 +262,7 @@ class YukiModuleClient:
 
     def get_pubkey(self) -> Tuple[int, bytes]:
         err, data = self.request(CMD_GET_PUBKEY)
-        if len(data) != 64:
+        if len(data) != 32:
             self.log.warning("PubKey-lenght unexpected: %d", len(data))
         return err, data
 
@@ -444,7 +443,7 @@ def _print_info(msg: str) -> None:
 
 
 def _format_pubkey(pk: bytes) -> str:
-    # 64 bytes => 128 hex chars
+    # 32 bytes => 64 hex chars
     hx = pk.hex()
     if not hx:
         return ""
@@ -648,7 +647,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (once or multiple times)")
     ap.add_argument("--debug", action="store_true", help="Show stack traces for unexpected errors")
 
-
     sub = ap.add_subparsers(dest="cmd")
 
     sub.add_parser("shell", help="interactive mode (default)")
@@ -727,7 +725,7 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
             cli.geo_enable(args.enable)
             print(f"GEO {'enabled' if args.enable else 'disabled'}. Use 'poll' to receive reports.")
             return 0
-        
+
         if args.cmd == "set_uuid":
             try:
                 value = int(args.value, 0)
