@@ -61,8 +61,9 @@ CMD_VERSION    = 0x06
 CMD_STATUS     = 0x07
 CMD_GPS_ENABLE = 0x08
 CMD_GEO_RPT    = 0x09
-CMD_GET_TIME   = 0x0A
-CMD_SET_UUID    = 0x0B
+CMD_GET_TIME      = 0x0A
+CMD_SET_UUID      = 0x0B
+CMD_GET_CLAIMCODE = 0x0D
 
 # Types
 TYPE_INT32   = 0x01
@@ -265,6 +266,10 @@ class YukiModuleClient:
         if len(data) != 32:
             self.log.warning("PubKey-lenght unexpected: %d", len(data))
         return err, data
+
+    def get_claimcode(self) -> Tuple[int, str]:
+        err, data = self.request(CMD_GET_CLAIMCODE)
+        return err, data.decode('utf-8', errors='replace')
 
     def get_time(self) -> Tuple[int, Optional[int]]:
         err, data = self.request(CMD_GET_TIME)
@@ -548,6 +553,13 @@ class YukiShell(cmd.Cmd):
             else:
                 _print_info(f"PUBKEY: {ERR_STR.get(e, hex(e))}")
 
+    def do_claimcode(self, arg: str) -> None:
+        """claimcode  -> get claim code"""
+        r = self._safe_call(self.cli.get_claimcode)
+        if r is not None:
+            e, v = r
+            _print_info(f"CLAIMCODE: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
     def do_time(self, arg: str) -> None:
         """time  -> get device time"""
         r = self._safe_call(self.cli.get_time)
@@ -656,6 +668,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("imei")
     sub.add_parser("iccid")
     sub.add_parser("pubkey")
+    sub.add_parser("claimcode")
     sub.add_parser("time")
     geo_p = sub.add_parser("geo_enable", help="enable/disable geolocation")
     geo_p.add_argument("enable", type=int, choices=[0, 1], help="1=enable, 0=disable")
@@ -712,6 +725,11 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
                 return 0
             print("PUBKEY:", ERR_STR.get(e, hex(e)))
             return 3
+
+        if args.cmd == "claimcode":
+            e, v = cli.get_claimcode()
+            print("CLAIMCODE:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
 
         if args.cmd == "time":
             e, ts = cli.get_time()

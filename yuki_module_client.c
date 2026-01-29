@@ -240,6 +240,23 @@ bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bo
     return (e == ERR_OK);
 }
 
+bool yuki_module_set_uuid(uint32_t value)
+ {
+     YukiModuleMsg m; memset(&m, 0, sizeof m);
+     m.t = CMD_SET_UUID;
+ 
+     m.v[0] = (uint8_t)((value >> 24) & 0xFF);
+     m.v[1] = (uint8_t)((value >> 16) & 0xFF);
+     m.v[2] = (uint8_t)((value >> 8) & 0xFF);
+     m.v[3] = (uint8_t)(value & 0xFF);
+     m.l = 4;
+     if (value > 99999999){ return false;}
+ 
+     YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+     if (!yuki_module_request(&m, &r, &e)) return false;
+     return (e == ERR_OK);
+ }
+
 bool yuki_module_sync(void)
 {
     YukiModuleMsg m = { .t = CMD_SYNC, .l = 0 };
@@ -314,6 +331,21 @@ bool yuki_module_get_iccid(char* out, size_t out_len)
     return true;
 }
 
+bool yuki_module_get_claimcode(char* out, size_t out_len)
+{
+    if (!out || out_len == 0) { errno = EINVAL; return false; }
+    YukiModuleMsg m = { .t = CMD_GET_CLAIMCODE, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    if (e != ERR_OK) { errno = EPROTO; return false; }
+    if (r.l <= 1) { out[0] = '\0'; return true; }
+    size_t n = (size_t)(r.l - 1);
+    if (n >= (out_len - 1)) n = out_len - 1;
+    memcpy(out, &r.v[1], n);
+    out[n] = '\0';
+    return true;
+}
+
 
 bool yuki_module_get_time(uint32_t* out)
 {
@@ -331,12 +363,10 @@ bool yuki_module_get_time(uint32_t* out)
 }
 
 /* Geolocation API */
-bool yuki_module_geo_enable(uint8_t enable)
+bool yuki_module_geo_enable(bool enable)
 {
-    if (enable > 1) { errno = EINVAL; return false; }
-
-    YukiModuleMsg m = { .t = CMD_GPS_ENABLE /* oder euer richtiger CMD */, .l = 1 };
-    m.v[0] = enable;
+    YukiModuleMsg m = { .t = CMD_GEO_ENA, .l = 1 };
+    m.v[0] = enable ? 1 : 0;
     return yuki_module_send(&m);
 }
 
