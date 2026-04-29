@@ -64,6 +64,9 @@ CMD_GEO_RPT    = 0x09
 CMD_GET_TIME      = 0x0A
 CMD_SET_UUID      = 0x0B
 CMD_GET_CLAIMCODE = 0x0D
+CMD_GET_LTE_QUALITY     = 0x0E
+CMD_GET_LTE_CONNECTED   = 0x0F
+CMD_GET_CLOUD_CONNECTED = 0x10
 
 # Types
 TYPE_INT32   = 0x01
@@ -270,6 +273,30 @@ class YukiModuleClient:
     def get_claimcode(self) -> Tuple[int, str]:
         err, data = self.request(CMD_GET_CLAIMCODE)
         return err, data.decode('utf-8', errors='replace')
+
+    def get_lte_quality(self) -> Tuple[int, Optional[int]]:
+        err, data = self.request(CMD_GET_LTE_QUALITY)
+        if err != ERR_OK:
+            return err, None
+        if len(data) < 1:
+            raise IOError("Protocol error: CMD_GET_LTE_QUALITY payload too short")
+        return err, data[0]
+
+    def get_lte_connected(self) -> Tuple[int, Optional[bool]]:
+        err, data = self.request(CMD_GET_LTE_CONNECTED)
+        if err != ERR_OK:
+            return err, None
+        if len(data) < 1:
+            raise IOError("Protocol error: CMD_GET_LTE_CONNECTED payload too short")
+        return err, data[0] != 0
+
+    def get_cloud_connected(self) -> Tuple[int, Optional[bool]]:
+        err, data = self.request(CMD_GET_CLOUD_CONNECTED)
+        if err != ERR_OK:
+            return err, None
+        if len(data) < 1:
+            raise IOError("Protocol error: CMD_GET_CLOUD_CONNECTED payload too short")
+        return err, data[0] != 0
 
     def get_time(self) -> Tuple[int, Optional[int]]:
         err, data = self.request(CMD_GET_TIME)
@@ -560,6 +587,27 @@ class YukiShell(cmd.Cmd):
             e, v = r
             _print_info(f"CLAIMCODE: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
 
+    def do_lte_quality(self, arg: str) -> None:
+        """lte_quality  -> get LTE signal quality (0..255)"""
+        r = self._safe_call(self.cli.get_lte_quality)
+        if r is not None:
+            e, q = r
+            _print_info(f"LTE_QUALITY: {q if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
+    def do_lte_connected(self, arg: str) -> None:
+        """lte_connected  -> check if LTE is connected"""
+        r = self._safe_call(self.cli.get_lte_connected)
+        if r is not None:
+            e, v = r
+            _print_info(f"LTE_CONNECTED: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
+    def do_cloud_connected(self, arg: str) -> None:
+        """cloud_connected  -> check if cloud is connected"""
+        r = self._safe_call(self.cli.get_cloud_connected)
+        if r is not None:
+            e, v = r
+            _print_info(f"CLOUD_CONNECTED: {v if e == ERR_OK else ERR_STR.get(e, hex(e))}")
+
     def do_time(self, arg: str) -> None:
         """time  -> get device time"""
         r = self._safe_call(self.cli.get_time)
@@ -669,6 +717,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     sub.add_parser("iccid")
     sub.add_parser("pubkey")
     sub.add_parser("claimcode")
+    sub.add_parser("lte_quality")
+    sub.add_parser("lte_connected")
+    sub.add_parser("cloud_connected")
     sub.add_parser("time")
     geo_p = sub.add_parser("geo_enable", help="enable/disable geolocation")
     geo_p.add_argument("enable", type=int, choices=[0, 1], help="1=enable, 0=disable")
@@ -729,6 +780,21 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
         if args.cmd == "claimcode":
             e, v = cli.get_claimcode()
             print("CLAIMCODE:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "lte_quality":
+            e, q = cli.get_lte_quality()
+            print("LTE_QUALITY:", q if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "lte_connected":
+            e, v = cli.get_lte_connected()
+            print("LTE_CONNECTED:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
+            return 0 if e == ERR_OK else 3
+
+        if args.cmd == "cloud_connected":
+            e, v = cli.get_cloud_connected()
+            print("CLOUD_CONNECTED:", v if e == ERR_OK else ERR_STR.get(e, hex(e)))
             return 0 if e == ERR_OK else 3
 
         if args.cmd == "time":

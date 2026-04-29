@@ -56,7 +56,10 @@ typedef enum {
     CMD_GEO_RPT    = 0x09,
     CMD_GET_TIME   = 0x0A,
     CMD_SET_UUID   = 0x0B,
-    CMD_GET_CLAIMCODE = 0x0D
+    CMD_GET_CLAIMCODE = 0x0D,
+    CMD_GET_LTE_QUALITY     = 0x0E,
+    CMD_GET_LTE_CONNECTED   = 0x0F,
+    CMD_GET_CLOUD_CONNECTED = 0x10
 } YukiModuleCmd;
 
 /* Data types in payload (TYPE_*) */
@@ -157,6 +160,9 @@ bool yuki_module_get_iccid(char* out, size_t out_len);
 bool yuki_module_get_time(uint32_t* out_unix_ts_utc);
 bool yuki_module_set_uuid(uint32_t value);
 bool yuki_module_get_claimcode(char* out, size_t out_len);
+bool yuki_module_get_lte_quality(uint8_t* out);
+bool yuki_module_get_lte_connected(bool* out);
+bool yuki_module_get_cloud_connected(bool* out);
 
 /* Geolocation API */
 bool yuki_module_geo_enable(bool);       /* Send CMD_GEO_ENA; report is delivered asynchronously */

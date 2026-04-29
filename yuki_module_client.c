@@ -347,6 +347,42 @@ bool yuki_module_get_claimcode(char* out, size_t out_len)
 }
 
 
+bool yuki_module_get_lte_quality(uint8_t* out)
+{
+    if (!out) { errno = EINVAL; return false; }
+    YukiModuleMsg m = { .t = CMD_GET_LTE_QUALITY, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    if (e != ERR_OK) { errno = EPROTO; return false; }
+    if (r.l < 1 + 1) { errno = EPROTO; return false; }
+    *out = r.v[1];
+    return true;
+}
+
+bool yuki_module_get_lte_connected(bool* out)
+{
+    if (!out) { errno = EINVAL; return false; }
+    YukiModuleMsg m = { .t = CMD_GET_LTE_CONNECTED, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    if (e != ERR_OK) { errno = EPROTO; return false; }
+    if (r.l < 1 + 1) { errno = EPROTO; return false; }
+    *out = r.v[1] != 0;
+    return true;
+}
+
+bool yuki_module_get_cloud_connected(bool* out)
+{
+    if (!out) { errno = EINVAL; return false; }
+    YukiModuleMsg m = { .t = CMD_GET_CLOUD_CONNECTED, .l = 0 };
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    if (e != ERR_OK) { errno = EPROTO; return false; }
+    if (r.l < 1 + 1) { errno = EPROTO; return false; }
+    *out = r.v[1] != 0;
+    return true;
+}
+
 bool yuki_module_get_time(uint32_t* out)
 {
     if (!out) { errno = EINVAL; return false; }
