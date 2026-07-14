@@ -290,14 +290,14 @@ bool yuki_module_status(YukiModuleErr* out_status)
     return true;
 }
 
-bool yuki_module_get_pubkey(uint8_t out64[64])
+bool yuki_module_get_pubkey(uint8_t out[YUKI_MODULE_PUBKEY_LEN])
 {
-    if (!out64) { errno = EINVAL; return false; }
+    if (!out) { errno = EINVAL; return false; }
     YukiModuleMsg m = { .t = CMD_GET_PUBKEY, .l = 0 };
     YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
     if (!yuki_module_request(&m, &r, &e)) return false;
-    if (e != ERR_OK || r.l < (1 + 64)) { errno = EPROTO; return false; }
-    memcpy(out64, &r.v[1], 64);
+    if (e != ERR_OK || r.l < (1 + YUKI_MODULE_PUBKEY_LEN)) { errno = EPROTO; return false; }
+    memcpy(out, &r.v[1], YUKI_MODULE_PUBKEY_LEN);
     return true;
 }
 
@@ -381,6 +381,15 @@ bool yuki_module_get_cloud_connected(bool* out)
     if (r.l < 1 + 1) { errno = EPROTO; return false; }
     *out = r.v[1] != 0;
     return true;
+}
+
+bool yuki_module_factory_reset(void)
+{
+    /* The module wipes its cached identity and reboots without replying, so
+       this is fire-and-forget: send the command and do NOT wait for a
+       response (there is none). */
+    YukiModuleMsg m = { .t = CMD_FACTORY_RESET, .l = 0 };
+    return yuki_module_send(&m);
 }
 
 bool yuki_module_get_time(uint32_t* out)

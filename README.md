@@ -89,16 +89,16 @@ yuki_module_version(ver, sizeof ver);
 uint32_t ts_utc;
 yuki_module_get_time(&ts_utc);
 
-// Public key (64 B)
-uint8_t pubkey[64];
+// Public key (ed25519, 32 B)
+uint8_t pubkey[YUKI_MODULE_PUBKEY_LEN];
 yuki_module_get_pubkey(pubkey);
 ```
 
 **Asynchronous geolocation:**
 
 ```c
-// Send request (no immediate response)
-yuki_module_geo_request();
+// Enable geolocation (no immediate report; reports arrive asynchronously)
+yuki_module_geo_enable(true);
 
 // Callback on later report
 void on_geolocation(const YukiModuleGeo* g) {
@@ -139,20 +139,30 @@ If the CRC check fails, the library automatically discards the frame.
 
 | Code | Symbol | Direction | Description |
 |:----:|:----------------|:--------------|:-------------------------------|
-| 0x00 | CMD_GET_PUBKEY | Host → module | Retrieve public key (64 B) |
+| 0x00 | CMD_GET_PUBKEY | Host → module | Retrieve public key (ed25519, 32 B) |
 | 0x01 | CMD_GET_IMEI | Host → module | Retrieve IMEI (ASCII) |
 | 0x02 | CMD_GET_ICCID | Host → module | Retrieve ICCID (ASCII) |
 | 0x04 | CMD_SET | both directions | Set a value or deliver an event |
 | 0x05 | CMD_SYNC | Host → module | Cloud synchronisation |
 | 0x06 | CMD_VERSION | Host → module | Firmware version |
 | 0x07 | CMD_STATUS | Host → module | Status (error code) |
-| 0x08 | CMD_GEO_REQ | Host → module | Request geolocation |
+| 0x08 | CMD_GEO_ENA | Host → module | Enable/disable geolocation (1 payload byte: 1=on, 0=off) |
 | 0x09 | CMD_GEO_RPT | Module → host | Geolocation report (asynchronous) |
 | 0x0A | CMD_GET_TIME | Host → module | Read module time (Unix time, UTC) |
+| 0x0B | CMD_SET_UUID | Host → module | Set device UUID (uint32) |
+| 0x0D | CMD_GET_CLAIMCODE | Host → module | Retrieve claim code (ASCII) |
+| 0x0E | CMD_GET_LTE_QUALITY | Host → module | LTE signal quality (1 byte) |
+| 0x0F | CMD_GET_LTE_CONNECTED | Host → module | Modem data connection up (1 byte bool) |
+| 0x10 | CMD_GET_CLOUD_CONNECTED | Host → module | Coldwave backend attached (1 byte bool) |
+| 0x11 | CMD_FACTORY_RESET | Host → module | Wipe cached identity + reboot (**no response**) |
 
 **Synchronous response format:**  
-The first byte of the response payload contains the error code (`ERR_OK`, `ERR_CMD`, `ERR_ARG`, `ERR_BUSY`, `ERR_INTERNAL`).  
+The first byte of the response payload contains the error code (`ERR_OK`, `ERR_CMD`, `ERR_ARG`, `ERR_BUSY`, `ERR_SIM`, `ERR_NET`, `ERR_CONN`, `ERR_INTERNAL`).  
 Additional data starts at `payload[1]`.
+
+> **Note:** `CMD_FACTORY_RESET` is fire-and-forget — the module wipes its cached
+> identity and reboots without sending a reply, so the host must not wait for a
+> response.
 
 ---
 
@@ -255,8 +265,9 @@ python yuki_module_client.py -p /dev/ttyUSB0 imei
 python yuki_module_client.py -p /dev/ttyUSB0 iccid
 python yuki_module_client.py -p /dev/ttyUSB0 pubkey
 python yuki_module_client.py -p /dev/ttyUSB0 time
-python yuki_module_client.py -p /dev/ttyUSB0 geo-request
+python yuki_module_client.py -p /dev/ttyUSB0 geo_enable 1
 python yuki_module_client.py -p /dev/ttyUSB0 poll --secs 30
+python yuki_module_client.py -p /dev/ttyUSB0 factory_reset
 ```
 
 Interactive shell (default when no subcommand is given):
@@ -270,11 +281,12 @@ Available subcommands include (excerpt):
 - `status` – query the current status of the module
 - `sync` – trigger a cloud synchronisation
 - `version` – read the firmware version
-- `imei`, `iccid`, `pubkey` – read IMEI, ICCID and the 64-byte public key
+- `imei`, `iccid`, `pubkey` – read IMEI, ICCID and the 32-byte ed25519 public key
 - `time` – read current module time (`CMD_GET_TIME`, Unix time UTC)
-- `geo-request` – send a geolocation request (`CMD_GEO_REQ`)
+- `geo_enable <0|1>` – enable/disable geolocation (`CMD_GEO_ENA`)
 - `poll` – continuously read and decode frames (including `CMD_GEO_RPT`)
 - `set` – write a value by parameter ID and type
+- `factory_reset` – wipe cached identity and reboot (`CMD_FACTORY_RESET`, no response)
 
 If you start the tool without a subcommand (or with `shell`), it enters an interactive REPL where you can run multiple commands in one session.
 
@@ -306,8 +318,8 @@ value = (5).to_bytes(1, "big")
 err = cli.set_value(0x1234, TYPE_UINT8, value, read_only=False)
 print("SET:", err)
 
-# Request geolocation and poll for reports
-cli.geo_request()
+# Enable geolocation and poll for reports
+cli.geo_enable(1)
 cli.poll_loop(duration=10.0)
 
 cli.close()

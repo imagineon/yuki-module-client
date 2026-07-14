@@ -67,6 +67,7 @@ CMD_GET_CLAIMCODE = 0x0D
 CMD_GET_LTE_QUALITY     = 0x0E
 CMD_GET_LTE_CONNECTED   = 0x0F
 CMD_GET_CLOUD_CONNECTED = 0x10
+CMD_FACTORY_RESET       = 0x11
 
 # Types
 TYPE_INT32   = 0x01
@@ -83,7 +84,7 @@ TYPE_DOUBLE  = 0x0B
 TYPE_BIN     = 0x0C
 TYPE_UINT64  = 0x0D
 TYPE_STRING  = 0x0E
-TYPE_IINT64  = 0x0F
+TYPE_INT64   = 0x0F
 
 # Error codes
 ERR_OK        = 0x00
@@ -330,6 +331,14 @@ class YukiModuleClient:
         payload = struct.pack(">I", value & 0xFFFFFFFF)
         err, _ = self.request(CMD_SET_UUID, payload)
         return err
+
+    def factory_reset(self) -> bool:
+        """Sends CMD_FACTORY_RESET: the module wipes its cached identity
+        (IMEI/ICCID/UUID) and reboots without replying, so this is
+        fire-and-forget - it only sends the frame and does NOT wait for a
+        response (there is none)."""
+        self.send_frame(CMD_FACTORY_RESET, b"")
+        return True
     # ------------- Geolocation -------------
 
     def geo_enable(self, enable: int) -> None:
@@ -428,7 +437,7 @@ def parse_type_and_value(tname: str, value: str) -> Tuple[int, bytes]:
         v = int(value, 0)
         if not -9223372036854775808 <= v <= 9223372036854775807:
             raise ValueError("int64 out of range")
-        return TYPE_IINT64, struct.pack(">q", v)
+        return TYPE_INT64, struct.pack(">q", v)
     if t in ("bool", "boolean"):
         bv = value.lower()
         vv = 1 if bv in ("1", "true", "yes", "y", "on") else 0
@@ -634,6 +643,12 @@ class YukiShell(cmd.Cmd):
             _print_info(f"SET_UUID: {ERR_STR.get(r, hex(r))}")
 
 
+    def do_factory_reset(self, arg: str) -> None:
+        """factory_reset  -> wipe cached identity (IMEI/ICCID/UUID) + reboot (no response expected)"""
+        r = self._safe_call(self.cli.factory_reset)
+        if r:
+            _print_info("FACTORY_RESET: sent (module wipes identity and reboots; no response expected)")
+
     def do_geo_enable(self, arg: str) -> None:
         """geo-enable <0|1>  -> enable/disable geolocation (async; use poll to receive reports)"""
         a = arg.strip()
@@ -730,6 +745,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     set_uuid_p = sub.add_parser("set_uuid", help="set UUID (uint32)")
     set_uuid_p.add_argument("value", help="uint32 value (e.g. 0x12345678 or 305419896)")
 
+    sub.add_parser("factory_reset", help="wipe cached identity (IMEI/ICCID/UUID) + reboot (no response)")
+
     set_p = sub.add_parser("set", help="set Value")
     set_p.add_argument("param_id", help="Parameter-ID (e.g. 0x1234)")
     set_p.add_argument("type", help="Datatype (uint8,int16,string,bin,...)")
@@ -819,6 +836,11 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
             e = cli.set_uuid(value)
             print("SET_UUID:", ERR_STR.get(e, hex(e)))
             return 0 if e == ERR_OK else 3
+
+        if args.cmd == "factory_reset":
+            cli.factory_reset()
+            print("FACTORY_RESET: sent (module wipes identity and reboots; no response expected)")
+            return 0
 
         if args.cmd == "poll":
             cli.poll_loop(duration=args.secs)

@@ -43,6 +43,9 @@ extern "C" {
 
 #define YUKI_MODULE_MAX_TLV_LENGTH 511
 
+/* Public key length: ed25519 raw public key = 32 bytes */
+#define YUKI_MODULE_PUBKEY_LEN 32
+
 /* Commands (Type) */
 typedef enum {
     CMD_GET_PUBKEY = 0x00,
@@ -59,7 +62,8 @@ typedef enum {
     CMD_GET_CLAIMCODE = 0x0D,
     CMD_GET_LTE_QUALITY     = 0x0E,
     CMD_GET_LTE_CONNECTED   = 0x0F,
-    CMD_GET_CLOUD_CONNECTED = 0x10
+    CMD_GET_CLOUD_CONNECTED = 0x10,
+    CMD_FACTORY_RESET       = 0x11
 } YukiModuleCmd;
 
 /* Data types in payload (TYPE_*) */
@@ -78,7 +82,7 @@ typedef enum {
     TYPE_BIN     = 0x0C,
     TYPE_UINT64  = 0x0D,
     TYPE_STRING  = 0x0E,
-    TYPE_IINT64  = 0x0F
+    TYPE_INT64   = 0x0F
 } YukiModuleType;
 
 /* Error codes in response payload[0] for synchronous replies */
@@ -87,6 +91,9 @@ typedef enum {
     ERR_CMD       = 0x01,
     ERR_ARG       = 0x02,
     ERR_BUSY      = 0x03,
+    ERR_SIM       = 0x10,
+    ERR_NET       = 0x11,
+    ERR_CONN      = 0x12,
     ERR_INTERNAL  = 0xFF
 } YukiModuleErr;
 
@@ -154,7 +161,7 @@ bool yuki_module_set(uint16_t id, uint8_t type, const void* data, size_t len, bo
 bool yuki_module_sync(void);
 bool yuki_module_version(char* out, size_t out_len);
 bool yuki_module_status(YukiModuleErr* out_status);
-bool yuki_module_get_pubkey(uint8_t out64[64]);
+bool yuki_module_get_pubkey(uint8_t out[YUKI_MODULE_PUBKEY_LEN]); /* ed25519, 32 bytes */
 bool yuki_module_get_imei(char* out, size_t out_len);
 bool yuki_module_get_iccid(char* out, size_t out_len);
 bool yuki_module_get_time(uint32_t* out_unix_ts_utc);
@@ -163,6 +170,11 @@ bool yuki_module_get_claimcode(char* out, size_t out_len);
 bool yuki_module_get_lte_quality(uint8_t* out);
 bool yuki_module_get_lte_connected(bool* out);
 bool yuki_module_get_cloud_connected(bool* out);
+
+/* Wipe the cached identity (IMEI/ICCID/UUID) and reboot the module.
+   Fire-and-forget: the module reboots without replying, so this only sends
+   the command and does NOT wait for a response (there is none). */
+bool yuki_module_factory_reset(void);
 
 /* Geolocation API */
 bool yuki_module_geo_enable(bool);       /* Send CMD_GEO_ENA; report is delivered asynchronously */
