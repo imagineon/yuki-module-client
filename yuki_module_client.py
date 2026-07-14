@@ -59,7 +59,7 @@ CMD_SET        = 0x04
 CMD_SYNC       = 0x05
 CMD_VERSION    = 0x06
 CMD_STATUS     = 0x07
-CMD_GPS_ENABLE = 0x08
+CMD_GEO_ENA    = 0x08
 CMD_GEO_RPT    = 0x09
 CMD_GET_TIME      = 0x0A
 CMD_SET_UUID      = 0x0B
@@ -345,7 +345,7 @@ class YukiModuleClient:
         """Sends a geolocation request. There is NO immediate response."""
         if enable not in (0, 1):
             raise ValueError("enable must be 0 or 1")
-        err, _ = self.request(CMD_GPS_ENABLE, bytes([enable]))
+        err, _ = self.request(CMD_GEO_ENA, bytes([enable]))
         return err
 
 
