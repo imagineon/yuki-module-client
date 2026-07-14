@@ -45,6 +45,9 @@ except ImportError as e:
     print("pyserial not installed. Please install with 'pip install pyserial'.", file=sys.stderr)
     raise
 
+# Client library version — tracks the YUKI module protocol/firmware it targets
+__version__ = "1.0.1"
+
 # ---------------------------------------------------------------------
 # Protokoll-Konstanten
 # ---------------------------------------------------------------------
@@ -721,6 +724,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--timeout", type=float, default=1.0, help="Read/Write timeout in seconds (Default: 1.0)")
     ap.add_argument("-v", "--verbose", action="count", default=0, help="Verbosity (once or multiple times)")
     ap.add_argument("--debug", action="store_true", help="Show stack traces for unexpected errors")
+    ap.add_argument("--version", action="version", version=f"yuki_module_client {__version__}")
 
     sub = ap.add_subparsers(dest="cmd")
 

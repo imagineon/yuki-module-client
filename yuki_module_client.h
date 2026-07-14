@@ -41,6 +41,9 @@
 extern "C" {
 #endif
 
+/* Client library version — tracks the YUKI module protocol/firmware it targets */
+#define YUKI_MODULE_CLIENT_VERSION "1.0.1"
+
 #define YUKI_MODULE_MAX_TLV_LENGTH 511
 
 /* Public key length: ed25519 raw public key = 32 bytes */

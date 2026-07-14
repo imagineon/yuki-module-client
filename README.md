@@ -5,6 +5,8 @@ The library abstracts all framing, checksum logic and the processing of incoming
 
 In addition, the package contains a Python client (`yuki_module_client.py`) which implements the same protocol and provides a convenient CLI for debugging and scripting.
 
+> **Version:** 1.0.1 — targets YUKI module firmware 1.0.x (UART protocol commands `0x00`–`0x11`, incl. `CMD_FACTORY_RESET`). See [CHANGELOG.md](CHANGELOG.md) for the release history. The version is exposed as `YUKI_MODULE_CLIENT_VERSION` (C), `__version__` / `--version` (Python).
+
 ---
 
 ## 1.1 Overview
