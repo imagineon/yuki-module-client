@@ -2,6 +2,16 @@
 #include <string.h>
 #include <errno.h>
 
+/* How many frames that are not our reply we consume before giving up, and how
+   many read chunks we discard while resyncing. Both are bounds against a peer
+   that never stops talking -- not tuning knobs. */
+#define YUKI_MODULE_MAX_STRAY_FRAMES  8
+#define YUKI_MODULE_MAX_DRAIN_CHUNKS  64
+
+/* Forward declarations */
+static void dispatch_async(const YukiModuleMsg* mp);
+static void drain_input(void);
+
 /* State management */
 static struct {
     void*          ctx;
@@ -48,6 +58,18 @@ static bool io_read_all(void* ctx, yuki_module_read_fn rf, uint8_t* buf, size_t 
     }
     return true;
 }
+/* Reads and discards whatever is still buffered, until the read callback
+   reports a timeout. The io abstraction has no flush, so this is the portable
+   way to get back onto a frame boundary after a failed exchange. */
+static void drain_input(void)
+{
+    uint8_t scratch[32];
+    for (int i = 0; i < YUKI_MODULE_MAX_DRAIN_CHUNKS; ++i) {
+        ssize_t n = g.read(g.ctx, scratch, sizeof scratch);
+        if (n <= 0) return;
+    }
+}
+
 static bool io_write_all(void* ctx, yuki_module_write_fn wf, const uint8_t* buf, size_t len)
 {
     size_t off = 0;
@@ -139,26 +161,49 @@ bool yuki_module_request(const YukiModuleMsg* out, YukiModuleMsg* in_msg, YukiMo
 
     if (!send_frame(out)) { g.ready = true; return false; }
 
-    YukiModuleMsg resp;
-    if (!recv_frame(&resp)) { g.ready = true; return false; }
+    /* The module echoes the request type in its reply. Anything else is either
+       an unsolicited frame or the late reply to a request we already gave up
+       on -- accepting it here would return another command's payload as if it
+       were ours, and would keep every later exchange shifted by one request for
+       the rest of the session. */
+    for (int stray = 0; stray <= YUKI_MODULE_MAX_STRAY_FRAMES; ++stray) {
+        YukiModuleMsg resp;
+        if (!recv_frame(&resp)) {
+            /* Timeout or CRC error: whatever is still in flight would desync
+               the next request, so drop it before returning. */
+            drain_input();
+            g.ready = true;
+            return false;
+        }
 
-    if (resp.l == 0) { g.ready = true; errno = EPROTO; return false; }
+        if (resp.t != out->t) { dispatch_async(&resp); continue; }
 
-    if (err) *err = (YukiModuleErr)resp.v[0];
-    if (in_msg) *in_msg = resp;
+        if (resp.l == 0) { g.ready = true; errno = EPROTO; return false; }
 
+        if (err) *err = (YukiModuleErr)resp.v[0];
+        if (in_msg) *in_msg = resp;
+
+        g.ready = true;
+        return true;
+    }
+
+    drain_input();
     g.ready = true;
-    return true;
+    errno = EPROTO;
+    return false;
 }
 
 /* Process incoming frame: SET and GEO_RPT are forwarded to callbacks. */
-bool yuki_module_poll_once(void)
+/* Dispatches a frame that is not the reply we are waiting for. Shared by
+   yuki_module_poll_once() and yuki_module_request(): an unsolicited SET or
+   GEO_RPT can land in the middle of a request/response exchange, and dropping
+   it there would lose the report. */
+static void dispatch_async(const YukiModuleMsg* mp)
 {
-    YukiModuleMsg m;
-    if (!recv_frame(&m)) return false;
+    const YukiModuleMsg m = *mp;
 
     if (m.t == CMD_SET && g.handler) {
-        if (m.l < 4) return true;
+        if (m.l < 4) return;
         uint16_t id  = (uint16_t)((m.v[0] << 8) | m.v[1]);
         bool ro      = (m.v[2] & 0x10) != 0;
         uint8_t type = m.v[3];
@@ -167,9 +212,9 @@ bool yuki_module_poll_once(void)
         size_t      len      = 0;
 
         if (type == TYPE_STRING || type == TYPE_BIN) {
-            if (m.l < 6) return true;
+            if (m.l < 6) return;
             len = (size_t)((m.v[4] << 8) | m.v[5]);
-            if (m.l != len + 6) return true;
+            if (m.l != len + 6) return;
             data_ptr = &m.v[6];
         } else {
             len = (size_t)(m.l - 4);
@@ -180,7 +225,7 @@ bool yuki_module_poll_once(void)
 
         YukiModuleMsg r = { .t = m.t, .l = 1, .v = { (uint8_t)ERR_OK } };
         (void)send_frame(&r);
-        return true;
+        return;
     }
 
     if (m.t == CMD_GEO_RPT && g.geo_cb) {
@@ -206,9 +251,17 @@ bool yuki_module_poll_once(void)
             gfix.hdop_centi = be32u(&m.v[18]);
             g.geo_cb(&gfix);
         }
-        return true;
+        return;
     }
 
+    return;
+}
+
+bool yuki_module_poll_once(void)
+{
+    YukiModuleMsg m;
+    if (!recv_frame(&m)) return false;
+    dispatch_async(&m);
     return true;
 }
 
@@ -410,9 +463,18 @@ bool yuki_module_get_time(uint32_t* out)
 /* Geolocation API */
 bool yuki_module_geo_enable(bool enable)
 {
+    /* NOT fire-and-forget: the module answers GEO_ENA with a status byte (the
+       fix itself arrives later as an unsolicited GEO_RPT). Sending without
+       reading left that reply in the stream, so the next request picked it up
+       instead of its own and every later exchange stayed shifted by one.
+       Returns false on a transport failure as well as on a module-side refusal
+       -- a build without GNSS (EG912) answers ERR_CMD here. */
     YukiModuleMsg m = { .t = CMD_GEO_ENA, .l = 1 };
     m.v[0] = enable ? 1 : 0;
-    return yuki_module_send(&m);
+
+    YukiModuleMsg r; YukiModuleErr e = ERR_INTERNAL;
+    if (!yuki_module_request(&m, &r, &e)) return false;
+    return (e == ERR_OK);
 }
 
 bool yuki_module_set_geo_callback(yuki_module_on_geo_fn cb)

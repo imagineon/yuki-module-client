@@ -46,7 +46,7 @@ except ImportError as e:
     raise
 
 # Client library version — tracks the YUKI module protocol/firmware it targets
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 # ---------------------------------------------------------------------
 # Protokoll-Konstanten
@@ -237,14 +237,45 @@ class YukiModuleClient:
 
     # ------------- Requests -------------
 
+    #: Frames that are not our reply which we consume before giving up, and read
+    #: chunks discarded while resyncing. Bounds against a peer that never stops
+    #: talking -- not tuning knobs.
+    MAX_STRAY_FRAMES = 8
+
     def request(self, t: int, payload: bytes = b"") -> Tuple[int, bytes]:
-        """Sends a request and waits for a response. Returns (err, data)."""
+        """Sends a request and waits for the reply that echoes its type.
+
+        The module echoes the request type back, so a frame carrying any other
+        type is either unsolicited (GEO_RPT / SET) or the late reply to a
+        request we already timed out on. Both used to be returned as if they
+        were this request's answer -- which is how a single read timeout left
+        every later response shifted by one request, silently, for the rest of
+        the session (a GET_LTE_QUALITY then reported the first ASCII digit of a
+        stale GET_IMEI reply). Unsolicited frames are dispatched, stale ones
+        dropped, and any framing failure resyncs the port.
+        """
         self.send_frame(t, payload)
-        rt, rp = self.recv_frame()
-        if len(rp) == 0:
-            raise IOError("Protocol error: empty response")
-        err = rp[0]
-        return err, rp[1:]
+
+        for _ in range(self.MAX_STRAY_FRAMES + 1):
+            try:
+                rt, rp = self.recv_frame()
+            except (TimeoutError, IOError):
+                # Whatever is still in flight would desync the next request.
+                self.ser.reset_input_buffer()
+                raise
+
+            if rt != t:
+                self.log.warning("Discarding frame 0x%02X while awaiting 0x%02X", rt, t)
+                self._dispatch_async(rt, rp)
+                continue
+
+            if len(rp) == 0:
+                raise IOError("Protocol error: empty response")
+            return rp[0], rp[1:]
+
+        self.ser.reset_input_buffer()
+        raise IOError("Protocol error: no reply to 0x%02X after %d stray frames"
+                      % (t, self.MAX_STRAY_FRAMES))
 
     # ------------- High-level API -------------
 
@@ -345,7 +376,12 @@ class YukiModuleClient:
     # ------------- Geolocation -------------
 
     def geo_enable(self, enable: int) -> None:
-        """Sends a geolocation request. There is NO immediate response."""
+        """Enables/disables geolocation. Returns the module's error code.
+
+        The reply is immediate and carries only that code -- the fix itself
+        arrives later as an unsolicited GEO_RPT frame (see poll_loop). A build
+        without GNSS (EG912) answers ERR_CMD here.
+        """
         if enable not in (0, 1):
             raise ValueError("enable must be 0 or 1")
         err, _ = self.request(CMD_GEO_ENA, bytes([enable]))
@@ -380,6 +416,11 @@ class YukiModuleClient:
             self.log.error("poll_once: %s", ex)
             return False
 
+        self._dispatch_async(t, p)
+        return True
+
+    def _dispatch_async(self, t: int, p: bytes) -> None:
+        """Handles a frame that is not a reply we are waiting for."""
         if t == CMD_GEO_RPT and self.geo_callback:
             geo = self._decode_geo(p)
             if geo:
@@ -389,7 +430,6 @@ class YukiModuleClient:
             self.log.info("Incoming SET: %s", p.hex())
         else:
             self.log.debug("Unexpected type: 0x%02X (len=%d)", t, len(p))
-        return True
 
     def poll_loop(self, duration: Optional[float] = None) -> None:
         """
@@ -661,7 +701,11 @@ class YukiShell(cmd.Cmd):
         enable = int(a)
         r = self._safe_call(self.cli.geo_enable, enable)
         if r is not None:
-            _print_info(f"GEO {'enabled. Use `poll` to receive reports.' if enable else 'disabled'}")
+            if r == ERR_OK:
+                _print_info(f"GEO {'enabled. Use `poll` to receive reports.' if enable else 'disabled'}")
+            else:
+                # e.g. ERR_CMD on the EG912 build, which has no GNSS at all.
+                _print_info(f"GEO_ENA: {ERR_STR.get(r, hex(r))}")
 
     def do_poll(self, arg: str) -> None:
         """poll [seconds]  -> read incoming frames; prints GEO reports"""
@@ -827,9 +871,12 @@ def run_one_shot(cli: YukiModuleClient, args: argparse.Namespace, log: logging.L
             return 3
 
         if args.cmd == "geo_enable":
-            cli.geo_enable(args.enable)
-            print(f"GEO {'enabled' if args.enable else 'disabled'}. Use 'poll' to receive reports.")
-            return 0
+            e = cli.geo_enable(args.enable)
+            if e == ERR_OK:
+                print(f"GEO {'enabled' if args.enable else 'disabled'}. Use 'poll' to receive reports.")
+                return 0
+            print("GEO_ENA:", ERR_STR.get(e, hex(e)))
+            return 3
 
         if args.cmd == "set_uuid":
             try:
