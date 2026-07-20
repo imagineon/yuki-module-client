@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version number tracks the YUKI module firmware / UART protocol version the
 client targets.
 
+## [1.0.2] - 2026-07-20
+
+Response-handling fixes. No protocol change and no new commands.
+
+### Fixed
+- Both clients now check that a reply echoes the request type before accepting
+  it. The module echoes the type back, but neither client compared it, so a
+  single read timeout (or any stray frame) made every later request read the
+  *previous* request's reply -- silently, for the rest of the session. A
+  `lte_quality` call then reported the first ASCII digit of a stale `imei`
+  reply, e.g. 56 for an IMEI starting with "8". Unsolicited `GEO_RPT` / `SET`
+  frames arriving mid-exchange are dispatched to their callbacks instead of
+  being mistaken for the reply.
+- Both clients resynchronise after a failed exchange: Python calls
+  `reset_input_buffer()`, the C client drains through its read callback (the io
+  abstraction has no flush). Without this the stale bytes desynced the next
+  request too.
+- C `yuki_module_geo_enable()` sent `GEO_ENA` fire-and-forget, but the module
+  always answers it with a status byte. The unread reply stayed in the stream
+  and shifted every subsequent exchange by one -- a far more reliable trigger
+  for the desync above than a timeout. It now reads its reply.
+- Python `geo_enable` reported success regardless of the module's answer, in
+  both the interactive console and the one-shot CLI. On a build without GNSS
+  (EG912) the module answers `ERR_CMD` and the client printed
+  "GEO enabled. Use `poll` to receive reports."
+
+### Changed
+- C `yuki_module_geo_enable()` now returns `true` only if the module accepted
+  the command, not merely if the frame went out. On an EG912 (no GNSS) it
+  therefore returns `false` where it previously returned `true`. Callers that
+  branch on it will see the difference.
+
 ## [1.0.1] - 2026-07-14
 
 Aligns the C and Python clients with the YUKI module 1.0.x UART protocol
