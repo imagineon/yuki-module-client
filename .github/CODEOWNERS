@@ -1,0 +1,22 @@
+# Sicherheitsrelevante Pfade: eine Aenderung daran braucht die Freigabe von
+# security-engineering. Sie ist der Gate-A-Entscheid nach SDL-002 Kap. 3.2.3 und
+# wird ueber das Org-Ruleset "Branch Protection - SDL" erzwungen. Welche
+# Prueftiefe daraus folgt, steht in SDL-002 Kap. 5.4: diese Pfade sind
+# Fachpruefung, alles Uebrige Kontrollpruefung.
+#
+# Die Kategorien kommen aus ISMS-001 Kap. 6.4: Krypto, Authentisierung, Parser
+# externer Eingaben, Update und Boot, externe Schnittstellen, Workflows,
+# Nachweise.
+# Bewusst ohne Catch-all: alles Uebrige bleibt beim Team embedded.
+#
+# WARNUNG: Eine Zeile wirkt nur, wenn das genannte Team im Repository
+# Schreibrecht hat. Fehlt es, verlangt GitHub fuer den Pfad gar kein Review und
+# meldet das nirgends. Dasselbe gilt fuer ein Team, das es nicht gibt.
+# Geprueft am 04.11.2026 gegen /repos/imagineon/yuki-module-client/teams.
+
+# Review-Regeln
+/.github/CODEOWNERS    @imagineon/security-engineering
+
+# Parser externer Eingaben: UART-Protokoll zum YUKI-Modul
+/yuki_module_client.c  @imagineon/security-engineering
+/yuki_module_client.h  @imagineon/security-engineering
